@@ -1,0 +1,40 @@
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-added-large-files
+      - id: check-merge-conflict
+      - id: mixed-line-ending
+      - id: check-vcs-permalinks
+
+  - repo: local
+    hooks:
+      - id: space-before-tab
+        name: check for space-before-tab in indentation
+        entry: sh -c 'git diff-index --check --cached $(git rev-parse --verify HEAD 2>/dev/null || echo 4b825dc642cb6eb9a060e54bf8d69288fbee4904) --'
+        language: system
+        always_run: true
+        pass_filenames: false
+
+  - repo: https://github.com/tekwizely/pre-commit-golang
+    rev: v1.0.0-rc.4
+    hooks:
+      - id: go-fmt-repo
+      - id: go-vet-repo-mod
+      - id: go-build-repo-mod
+      - id: go-test-repo-mod
+      - id: go-mod-tidy-repo
+      - id: golangci-lint-repo-mod
+
+  - repo: https://github.com/shellcheck-py/shellcheck-py
+    rev: v0.10.0.1
+    hooks:
+      - id: shellcheck
+
+  - repo: https://github.com/rhysd/actionlint
+    rev: v1.7.7
+    hooks:
+      - id: actionlint

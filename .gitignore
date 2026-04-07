@@ -1,0 +1,14 @@
+# Binaries
+/gdate
+/cmd/gdate/gdate
+
+# Test artifacts
+*.test
+*.out
+coverage.html
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*~
