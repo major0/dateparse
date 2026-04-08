@@ -1,2 +1,6 @@
+github.com/major0/optargs v0.4.1 h1:TCiR/1Rc41+JEhX8GrXZD2B2VnQjzak/8nBOfUJeNq4=
+github.com/major0/optargs v0.4.1/go.mod h1:umQbh05Y+3FKzyeJMORwEXRATO3cvSS8lZdCQJwBFJY=
+github.com/major0/optargs/pflags v0.3.2 h1:7Mq+hof8IL3dsgwBn2aMJwaD6H5K4lNRQVzGK6K5xc8=
+github.com/major0/optargs/pflags v0.3.2/go.mod h1:omdAged1gPzQTTiSW9oVnUASrWEI/PAJNrqoRScXPAo=
 pgregory.net/rapid v1.2.0 h1:keKAYRcjm+e1F0oAuU5F5+YPAWcyxNNRK2wud503Gnk=
 pgregory.net/rapid v1.2.0/go.mod h1:PY5XlDGj0+V1FCq0o192FdRhpKHGTRIWBgqjDBTrq04=
