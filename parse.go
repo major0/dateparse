@@ -1,4 +1,3 @@
-// Package dateparse provides GNU date --date compatible timestamp parsing.
 package dateparse
 
 import "time"
