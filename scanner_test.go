@@ -282,3 +282,476 @@ func TestMatchTimeOfDay(t *testing.T) {
 		})
 	}
 }
+
+// ---------------------------------------------------------------------------
+// TestMatchCalendarDate
+// ---------------------------------------------------------------------------
+
+func TestMatchCalendarDate(t *testing.T) {
+	tests := []struct {
+		name       string
+		input      string
+		wantAnchor time.Time
+		wantErr    bool
+	}{
+		{
+			name:       "ISO 2024-01-15",
+			input:      "2024-01-15",
+			wantAnchor: time.Date(2024, 1, 15, 0, 0, 0, 0, time.UTC),
+		},
+		{
+			name:       "ISO standalone not RFC 3339",
+			input:      "2024-01-15",
+			wantAnchor: time.Date(2024, 1, 15, 0, 0, 0, 0, time.UTC),
+		},
+		{
+			name:       "two-digit year 99",
+			input:      "99-01-15",
+			wantAnchor: time.Date(1999, 1, 15, 0, 0, 0, 0, time.UTC),
+		},
+		{
+			name:       "two-digit year 24",
+			input:      "24-01-15",
+			wantAnchor: time.Date(2024, 1, 15, 0, 0, 0, 0, time.UTC),
+		},
+		{
+			name:       "US format M/D/YYYY",
+			input:      "7/20/2020",
+			wantAnchor: time.Date(2020, 7, 20, 0, 0, 0, 0, time.UTC),
+		},
+		{
+			name:       "US format M/D ref year",
+			input:      "7/20",
+			wantAnchor: time.Date(2024, 7, 20, 0, 0, 0, 0, time.UTC),
+		},
+		{
+			name:       "literal D Mon YYYY",
+			input:      "20 jul 2020",
+			wantAnchor: time.Date(2020, 7, 20, 0, 0, 0, 0, time.UTC),
+		},
+		{
+			name:       "literal Mon D YYYY",
+			input:      "jul 20 2020",
+			wantAnchor: time.Date(2020, 7, 20, 0, 0, 0, 0, time.UTC),
+		},
+		{
+			name:       "literal Mon D, YYYY comma",
+			input:      "jul 20, 2020",
+			wantAnchor: time.Date(2020, 7, 20, 0, 0, 0, 0, time.UTC),
+		},
+		{
+			name:       "literal D-Mon-YYYY",
+			input:      "20-jul-2020",
+			wantAnchor: time.Date(2020, 7, 20, 0, 0, 0, 0, time.UTC),
+		},
+		{
+			name:       "literal D Mon ref year",
+			input:      "20 jul",
+			wantAnchor: time.Date(2024, 7, 20, 0, 0, 0, 0, time.UTC),
+		},
+		{
+			name:    "invalid date 2024-02-30",
+			input:   "2024-02-30",
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sc := &scanner{input: tt.input, pos: 0, ref: ref}
+			st, err := sc.scan()
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("expected error, got nil")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if st.anchor == nil {
+				t.Fatal("anchor should be set")
+			}
+			if !st.anchor.Equal(tt.wantAnchor) {
+				t.Errorf("anchor = %v, want %v", *st.anchor, tt.wantAnchor)
+			}
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// TestMatchTimezone
+// ---------------------------------------------------------------------------
+
+func TestMatchTimezone(t *testing.T) {
+	tests := []struct {
+		name         string
+		input        string
+		wantTZOffset int
+	}{
+		{name: "utc", input: "utc", wantTZOffset: 0},
+		{name: "z", input: "z", wantTZOffset: 0},
+		{name: "u.t.c.", input: "u.t.c.", wantTZOffset: 0},
+		{name: "utc+05:30", input: "utc+05:30", wantTZOffset: 19800},
+		{name: "utc-04", input: "utc-04", wantTZOffset: -14400},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sc := &scanner{input: tt.input, pos: 0, ref: ref}
+			st, err := sc.scan()
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if st.timeOfDay == nil {
+				t.Fatal("timeOfDay should be set by timezone matcher")
+			}
+			if st.timeOfDay.tzOffset == nil {
+				t.Fatal("tzOffset should be set")
+			}
+			if *st.timeOfDay.tzOffset != tt.wantTZOffset {
+				t.Errorf("tzOffset = %d, want %d", *st.timeOfDay.tzOffset, tt.wantTZOffset)
+			}
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// TestMatchNamedRef
+// ---------------------------------------------------------------------------
+
+func TestMatchNamedRef(t *testing.T) {
+	tests := []struct {
+		name       string
+		input      string
+		wantAnchor time.Time
+	}{
+		{name: "now", input: "now", wantAnchor: ref},
+		{name: "today", input: "today", wantAnchor: ref},
+		{name: "yesterday", input: "yesterday", wantAnchor: ref.AddDate(0, 0, -1)},
+		{name: "tomorrow", input: "tomorrow", wantAnchor: ref.AddDate(0, 0, 1)},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sc := &scanner{input: tt.input, pos: 0, ref: ref}
+			st, err := sc.scan()
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if st.anchor == nil {
+				t.Fatal("anchor should be set")
+			}
+			if !st.anchor.Equal(tt.wantAnchor) {
+				t.Errorf("anchor = %v, want %v", *st.anchor, tt.wantAnchor)
+			}
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// TestMatchDayOfWeek
+// ---------------------------------------------------------------------------
+
+func TestMatchDayOfWeek(t *testing.T) {
+	tests := []struct {
+		name       string
+		input      string
+		wantAnchor time.Time
+	}{
+		{
+			name:       "monday bare",
+			input:      "monday",
+			wantAnchor: time.Date(2024, 6, 17, 0, 0, 0, 0, time.UTC), // next Monday
+		},
+		{
+			name:       "last friday",
+			input:      "last friday",
+			wantAnchor: time.Date(2024, 6, 14, 0, 0, 0, 0, time.UTC),
+		},
+		{
+			name:       "next monday",
+			input:      "next monday",
+			wantAnchor: time.Date(2024, 6, 17, 0, 0, 0, 0, time.UTC),
+		},
+		{
+			name:       "this saturday",
+			input:      "this saturday",
+			wantAnchor: time.Date(2024, 6, 15, 0, 0, 0, 0, time.UTC),
+		},
+		{
+			name:       "third tuesday",
+			input:      "third tuesday",
+			wantAnchor: time.Date(2024, 6, 18, 0, 0, 0, 0, time.UTC).AddDate(0, 0, 14), // 3rd Tue after ref
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sc := &scanner{input: tt.input, pos: 0, ref: ref}
+			st, err := sc.scan()
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if st.anchor == nil {
+				t.Fatal("anchor should be set")
+			}
+			if !st.anchor.Equal(tt.wantAnchor) {
+				t.Errorf("anchor = %v, want %v", *st.anchor, tt.wantAnchor)
+			}
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// TestMatchRelative
+// ---------------------------------------------------------------------------
+
+func TestMatchRelative(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     string
+		wantDelta delta
+	}{
+		{name: "3 days", input: "3 days", wantDelta: delta{days: 3}},
+		{name: "day implicit", input: "day", wantDelta: delta{days: 1}},
+		{name: "+2 hours", input: "+2 hours", wantDelta: delta{hours: 2}},
+		{name: "-1 week", input: "-1 week", wantDelta: delta{days: -7}},
+		{name: "1 year 2 months", input: "1 year 2 months", wantDelta: delta{years: 1, months: 2}},
+		{name: "fortnight", input: "fortnight", wantDelta: delta{days: 14}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sc := &scanner{input: tt.input, pos: 0, ref: ref}
+			st, err := sc.scan()
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if st.delta != tt.wantDelta {
+				t.Errorf("delta = %+v, want %+v", st.delta, tt.wantDelta)
+			}
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// TestMatchDirectionOp
+// ---------------------------------------------------------------------------
+
+func TestMatchDirectionOp(t *testing.T) {
+	tests := []struct {
+		name       string
+		input      string
+		wantAnchor time.Time
+		wantErr    bool
+	}{
+		{
+			name:       "3 days ago",
+			input:      "3 days ago",
+			wantAnchor: ref.AddDate(0, 0, -3),
+		},
+		{
+			name:       "2 weeks hence",
+			input:      "2 weeks hence",
+			wantAnchor: ref.AddDate(0, 0, 14),
+		},
+		{
+			name:       "3 days before 2024-01-15",
+			input:      "3 days before 2024-01-15",
+			wantAnchor: time.Date(2024, 1, 12, 0, 0, 0, 0, time.UTC),
+		},
+		{
+			name:       "2 weeks after 2024-01-15",
+			input:      "2 weeks after 2024-01-15",
+			wantAnchor: time.Date(2024, 1, 29, 0, 0, 0, 0, time.UTC),
+		},
+		{
+			name:    "before without delta",
+			input:   "before",
+			wantErr: true,
+		},
+		{
+			name:    "after without delta",
+			input:   "after",
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sc := &scanner{input: tt.input, pos: 0, ref: ref}
+			st, err := sc.scan()
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("expected error, got nil")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if st.anchor == nil {
+				t.Fatal("anchor should be set")
+			}
+			if !st.anchor.Equal(tt.wantAnchor) {
+				t.Errorf("anchor = %v, want %v", *st.anchor, tt.wantAnchor)
+			}
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// TestMatchPureNumber
+// ---------------------------------------------------------------------------
+
+func TestMatchPureNumber(t *testing.T) {
+	tests := []struct {
+		name       string
+		input      string
+		wantAnchor *time.Time
+		wantTime   *timeOfDay
+		wantErr    bool
+	}{
+		{
+			name:       "8-digit date 20240115",
+			input:      "20240115",
+			wantAnchor: timePtr(time.Date(2024, 1, 15, 0, 0, 0, 0, time.UTC)),
+		},
+		{
+			name:     "4-digit time 1430",
+			input:    "1430",
+			wantTime: &timeOfDay{14, 30, 0, 0, nil},
+		},
+		{
+			name:    "invalid month 20241301",
+			input:   "20241301",
+			wantErr: true,
+		},
+		{
+			name:    "invalid hour 2561",
+			input:   "2561",
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sc := &scanner{input: tt.input, pos: 0, ref: ref}
+			st, err := sc.scan()
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("expected error, got nil")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if tt.wantAnchor != nil {
+				if st.anchor == nil {
+					t.Fatal("anchor should be set")
+				}
+				if !st.anchor.Equal(*tt.wantAnchor) {
+					t.Errorf("anchor = %v, want %v", *st.anchor, *tt.wantAnchor)
+				}
+			}
+			if tt.wantTime != nil {
+				if st.timeOfDay == nil {
+					t.Fatal("timeOfDay should be set")
+				}
+				assertTimeOfDay(t, tt.name, *st.timeOfDay, *tt.wantTime)
+			}
+		})
+	}
+}
+
+// timePtr is a helper to create *time.Time values.
+func timePtr(t time.Time) *time.Time { return &t }
+
+// ---------------------------------------------------------------------------
+// TestMatchNoise
+// ---------------------------------------------------------------------------
+
+func TestMatchNoise(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     string
+		wantDelta delta
+	}{
+		{
+			name:      "and between relative items",
+			input:     "2 weeks and 3 days",
+			wantDelta: delta{days: 17},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sc := &scanner{input: tt.input, pos: 0, ref: ref}
+			st, err := sc.scan()
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if st.delta != tt.wantDelta {
+				t.Errorf("delta = %+v, want %+v", st.delta, tt.wantDelta)
+			}
+		})
+	}
+
+	// Test "yesterday at 3pm" — anchor + time-of-day with noise "at"
+	t.Run("yesterday at 3pm", func(t *testing.T) {
+		sc := &scanner{input: "yesterday at 3pm", pos: 0, ref: ref}
+		st, err := sc.scan()
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		wantAnchor := ref.AddDate(0, 0, -1)
+		if st.anchor == nil {
+			t.Fatal("anchor should be set")
+		}
+		if !st.anchor.Equal(wantAnchor) {
+			t.Errorf("anchor = %v, want %v", *st.anchor, wantAnchor)
+		}
+		if st.timeOfDay == nil {
+			t.Fatal("timeOfDay should be set")
+		}
+		assertTimeOfDay(t, "yesterday at 3pm", *st.timeOfDay, timeOfDay{15, 0, 0, 0, nil})
+	})
+}
+
+// ---------------------------------------------------------------------------
+// TestConflictDetection
+// ---------------------------------------------------------------------------
+
+func TestConflictDetection(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+	}{
+		{name: "two anchors", input: "2024-01-15 2024-02-20"},
+		{name: "two time-of-day", input: "14:30 15:00"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sc := &scanner{input: tt.input, pos: 0, ref: ref}
+			_, err := sc.scan()
+			if err == nil {
+				t.Fatal("expected conflict error, got nil")
+			}
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// TestScanError
+// ---------------------------------------------------------------------------
+
+func TestScanError(t *testing.T) {
+	sc := &scanner{input: "xyzzy", pos: 0, ref: ref}
+	_, err := sc.scan()
+	if err == nil {
+		t.Fatal("expected error for unrecognized input, got nil")
+	}
+}

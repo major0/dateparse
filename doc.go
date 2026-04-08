@@ -6,10 +6,3 @@
 // Units accumulate into a multi-field delta with separate calendar fields
 // applied via time.AddDate and sub-day fields applied via time.Add.
 package dateparse
-
-// Compile-time assertions to suppress unused warnings during incremental
-// development. Remove once all types are consumed by production code.
-var (
-	_ calendarDate = calendarDate{}
-	_ dayOfWeekRef = dayOfWeekRef{}
-)

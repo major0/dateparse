@@ -13,10 +13,11 @@ type delta struct {
 
 // state is the scanner's accumulation register.
 type state struct {
-	delta     delta
-	anchor    *time.Time
-	timeOfDay *timeOfDay
-	direction int // +1 or -1, default +1
+	delta        delta
+	anchor       *time.Time
+	timeOfDay    *timeOfDay
+	direction    int  // -1 (before), +1 (after), 0 = no pending direction
+	thisModifier bool // true when "this" keyword was seen
 }
 
 // deltaField identifies which field of a delta a unit maps to.
