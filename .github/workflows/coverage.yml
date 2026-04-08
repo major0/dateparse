@@ -1,0 +1,66 @@
+name: Test Coverage
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  coverage:
+    name: Coverage
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/setup-go@v5
+      with:
+        go-version: '1.23'
+    - name: Run tests with coverage
+      run: .github/scripts/module-coverage.sh
+    - uses: codecov/codecov-action@v4
+      with:
+        file: ./coverage.out
+        flags: dateparse
+        name: dateparse-coverage
+        fail_ci_if_error: false
+    - uses: actions/upload-artifact@v4
+      with:
+        name: coverage-reports
+        path: |
+          coverage.out
+          coverage.html
+        retention-days: 30
+
+  coverage-regression:
+    name: Coverage Regression Check
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/setup-go@v5
+      with:
+        go-version: '1.23'
+    - run: sudo apt-get update && sudo apt-get install -y bc
+    - name: Generate PR coverage
+      run: |
+        go test -coverprofile=coverage.out -covermode=atomic ./...
+        echo "PR_COVERAGE=$(.github/scripts/coverage-extract.sh coverage.out)" >> "$GITHUB_ENV"
+    - name: Checkout main branch
+      uses: actions/checkout@v4
+      with:
+        ref: main
+    - name: Generate main coverage
+      run: |
+        if go test -coverprofile=coverage.out -covermode=atomic ./... 2>/dev/null; then
+          echo "MAIN_COVERAGE=$(.github/scripts/coverage-extract.sh coverage.out)" >> "$GITHUB_ENV"
+        else
+          echo "MAIN_COVERAGE=0" >> "$GITHUB_ENV"
+          echo "SKIP_REGRESSION=true" >> "$GITHUB_ENV"
+        fi
+    - name: Check for coverage regression
+      run: .github/scripts/coverage-regression.sh
