@@ -43,6 +43,12 @@ A GNU `date`-compatible command-line tool.
 gdate -d "3 days before Jan 15, 2025"
 gdate -d "last monday 3pm" +"%Y-%m-%d %H:%M"
 gdate -o "2 weeks and 3 days"
+gdate -o "3 weeks and 2 days" +"%{days} days %{hours} hours"
+# 23 days 0 hours
+gdate -o "1 year 2 months 5 hours ago" +"%{years} years %{months} months %{hours} hours"
+# -1 years -2 months -5 hours
+gdate -o "28 days" +"%{fortnights} fortnights"
+# 2 fortnights
 ```
 
 See [docs/gdate.md](docs/gdate.md) for the full CLI reference.
