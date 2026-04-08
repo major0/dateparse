@@ -54,7 +54,11 @@ func runDate(s, format string) {
 		os.Exit(1)
 	}
 	if format != "" {
-		fmt.Println(formatDate(t, format))
+		if format == "@" {
+			fmt.Println(t.Unix())
+		} else {
+			fmt.Println(formatDate(t, format))
+		}
 	} else {
 		fmt.Println(t.Format(time.UnixDate))
 	}
@@ -71,14 +75,8 @@ func runOffset(s, format string) {
 		if !strings.Contains(format, "%") {
 			name := strings.ToLower(format)
 			if entry, ok := dateparse.LookupUnit(name); ok {
-				nsPerUnit := nanosPerField[entry.Field] * int64(entry.Scale)
-				if nsPerUnit > 0 {
-					ns := totalNanos(d)
-					val := float64(ns) / float64(nsPerUnit)
-					fmt.Println(strconv.FormatFloat(val, 'f', -1, 64))
-				} else {
-					fmt.Println(0)
-				}
+				val := convertToUnitExact(d, entry.Field, entry.Scale)
+				fmt.Println(strconv.FormatFloat(val, 'f', -1, 64))
 				return
 			}
 		}
@@ -126,41 +124,56 @@ func totalSeconds(d dateparse.Duration) int64 {
 	return totalNanos(d) / 1e9
 }
 
-// convertToUnit collapses the entire Duration into the target unit.
-// The target unit is identified by its field and scale from the unit table.
-func convertToUnit(d dateparse.Duration, field dateparse.UnitField, scale int) int64 {
+// convertToUnitExact converts a Duration to the target unit using field-aware
+// arithmetic. Within the same field group (calendar: years/months, clock:
+// days/hours/minutes/seconds/nanos) the conversion is exact. Cross-group
+// conversion uses approximations (30 days/month, 365 days/year) only when
+// the other group has nonzero fields.
+func convertToUnitExact(d dateparse.Duration, field dateparse.UnitField, scale int) float64 {
 	if scale == 0 {
 		return 0
 	}
+
+	// Calendar group: total months.
+	calMonths := float64(int64(d.Years)*12 + int64(d.Months))
+
+	// Clock group: total nanoseconds.
+	clockNs := float64(int64(d.Days))*86400e9 +
+		float64(int64(d.Hours))*3600e9 +
+		float64(int64(d.Minutes))*60e9 +
+		float64(int64(d.Seconds))*1e9 +
+		float64(int64(d.Nanos))
+
 	switch field {
-	case dateparse.FieldYears:
-		// Collapse to total months, then to years via scale.
-		totalMonths := int64(d.Years)*12 + int64(d.Months)
-		// scale is in years, so convert: totalMonths / (scale * 12)
-		return totalMonths / (int64(scale) * 12)
-	case dateparse.FieldMonths:
-		totalMonths := int64(d.Years)*12 + int64(d.Months)
-		return totalMonths / int64(scale)
-	case dateparse.FieldDays:
-		totalDays := int64(d.Years)*365 + int64(d.Months)*30 + int64(d.Days)
-		return totalDays / int64(scale)
-	case dateparse.FieldHours:
-		totalDays := int64(d.Years)*365 + int64(d.Months)*30 + int64(d.Days)
-		totalHrs := totalDays*24 + int64(d.Hours)
-		return totalHrs / int64(scale)
-	case dateparse.FieldMinutes:
-		totalDays := int64(d.Years)*365 + int64(d.Months)*30 + int64(d.Days)
-		totalMins := totalDays*24*60 + int64(d.Hours)*60 + int64(d.Minutes)
-		return totalMins / int64(scale)
-	case dateparse.FieldSeconds:
-		ns := totalNanos(d)
-		totalSecs := ns / 1e9
-		return totalSecs / int64(scale)
-	case dateparse.FieldNanos:
-		ns := totalNanos(d)
-		return ns / int64(scale)
+	case dateparse.FieldYears, dateparse.FieldMonths:
+		// Target is calendar. Start with exact calendar months.
+		totalMonths := calMonths
+		// Cross-group: add clock contribution only if nonzero.
+		if clockNs != 0 {
+			totalMonths += clockNs / (30 * 86400e9) // approximate
+		}
+		// Convert months to target unit.
+		var monthsPerUnit float64
+		if field == dateparse.FieldYears {
+			monthsPerUnit = float64(scale) * 12
+		} else {
+			monthsPerUnit = float64(scale)
+		}
+		return totalMonths / monthsPerUnit
+
+	default:
+		// Target is clock (days, hours, minutes, seconds, nanos).
+		totalNs := clockNs
+		// Cross-group: add calendar contribution only if nonzero.
+		if calMonths != 0 {
+			totalNs += calMonths * 30 * 86400e9 // approximate
+		}
+		nsPerUnit := float64(nanosPerField[field]) * float64(scale)
+		if nsPerUnit == 0 {
+			return 0
+		}
+		return totalNs / nsPerUnit
 	}
-	return 0
 }
 
 // strftimeToGo maps GNU strftime tokens to Go time.Format reference time components.
@@ -422,13 +435,12 @@ func sortByPriority(order []int, phs []formatPlaceholder) {
 }
 
 // lookupDurationUnit resolves a unit name and converts the entire Duration
-// into that unit. E.g. for "3 days and 4 hours", %{seconds} returns the
-// total duration in seconds, not just the seconds field.
-func lookupDurationUnit(d dateparse.Duration, name string) int64 {
+// into that unit using field-aware exact arithmetic.
+func lookupDurationUnit(d dateparse.Duration, name string) float64 {
 	name = strings.ToLower(name)
 	entry, ok := dateparse.LookupUnit(name)
 	if !ok {
 		return 0
 	}
-	return convertToUnit(d, entry.Field, entry.Scale)
+	return convertToUnitExact(d, entry.Field, entry.Scale)
 }

@@ -174,3 +174,25 @@ func TestOffsetFortnights(t *testing.T) {
 		t.Errorf("expected ~0.2262, got %q", stdout)
 	}
 }
+
+func TestOffsetExactCalendarConversion(t *testing.T) {
+	// 4 seasons = 12 months = exactly 1 year (no approximation needed).
+	stdout, _, code := runGdate(t, "-o", "4 seasons", "+years")
+	if code != 0 {
+		t.Fatalf("expected exit 0, got %d", code)
+	}
+	if stdout != "1" {
+		t.Errorf("expected exactly 1, got %q", stdout)
+	}
+}
+
+func TestDateEpochFormat(t *testing.T) {
+	// +@ should output the Unix timestamp for the parsed date.
+	stdout, _, code := runGdate(t, "-d", "@0", "+@")
+	if code != 0 {
+		t.Fatalf("expected exit 0, got %d", code)
+	}
+	if stdout != "0" {
+		t.Errorf("expected 0, got %q", stdout)
+	}
+}
