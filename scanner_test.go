@@ -47,11 +47,11 @@ func TestScanEmptyInput(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if st.anchor != nil {
-		t.Error("anchor should be nil for empty input")
+	if st.anchorSet {
+		t.Error("anchor should not be set for empty input")
 	}
-	if st.timeOfDay != nil {
-		t.Error("timeOfDay should be nil for empty input")
+	if st.todSet {
+		t.Error("timeOfDay should not be set for empty input")
 	}
 	if st.delta != (delta{}) {
 		t.Errorf("delta should be zero, got %+v", st.delta)
@@ -64,11 +64,11 @@ func TestScanWhitespaceOnly(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if st.anchor != nil {
-		t.Error("anchor should be nil for whitespace-only input")
+	if st.anchorSet {
+		t.Error("anchor should not be set for whitespace-only input")
 	}
-	if st.timeOfDay != nil {
-		t.Error("timeOfDay should be nil for whitespace-only input")
+	if st.todSet {
+		t.Error("timeOfDay should not be set for whitespace-only input")
 	}
 	if st.delta != (delta{}) {
 		t.Errorf("delta should be zero, got %+v", st.delta)
@@ -101,11 +101,11 @@ func TestMatchComment(t *testing.T) {
 				t.Fatalf("unexpected error: %v", err)
 			}
 			// Comment should leave state unchanged.
-			if st.anchor != nil {
-				t.Error("anchor should be nil after comment")
+			if st.anchorSet {
+				t.Error("anchor should not be set after comment")
 			}
-			if st.timeOfDay != nil {
-				t.Error("timeOfDay should be nil after comment")
+			if st.todSet {
+				t.Error("timeOfDay should not be set after comment")
 			}
 			if st.delta != (delta{}) {
 				t.Errorf("delta should be zero, got %+v", st.delta)
@@ -143,12 +143,12 @@ func TestMatchEpoch(t *testing.T) {
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
-			if st.anchor == nil {
+			if !st.anchorSet {
 				t.Fatal("anchor should be set after epoch")
 			}
 			expected := time.Unix(tt.wantSec, int64(tt.wantNs))
 			if !st.anchor.Equal(expected) {
-				t.Errorf("anchor = %v, want %v", *st.anchor, expected)
+				t.Errorf("anchor = %v, want %v", st.anchor, expected)
 			}
 		})
 	}
@@ -221,19 +221,19 @@ func TestMatchRFC3339(t *testing.T) {
 			}
 
 			// Check anchor is set to the correct date at midnight UTC.
-			if st.anchor == nil {
+			if !st.anchorSet {
 				t.Fatal("anchor should be set after RFC 3339")
 			}
 			expectedAnchor := time.Date(tt.wantYear, time.Month(tt.wantMonth), tt.wantDay, 0, 0, 0, 0, time.UTC)
 			if !st.anchor.Equal(expectedAnchor) {
-				t.Errorf("anchor = %v, want %v", *st.anchor, expectedAnchor)
+				t.Errorf("anchor = %v, want %v", st.anchor, expectedAnchor)
 			}
 
 			// Check time-of-day is set.
-			if st.timeOfDay == nil {
+			if !st.todSet {
 				t.Fatal("timeOfDay should be set after RFC 3339")
 			}
-			assertTimeOfDay(t, tt.name, *st.timeOfDay, tt.wantTime)
+			assertTimeOfDay(t, tt.name, st.tod, tt.wantTime)
 		})
 	}
 }
@@ -275,10 +275,10 @@ func TestMatchTimeOfDay(t *testing.T) {
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
-			if st.timeOfDay == nil {
+			if !st.todSet {
 				t.Fatal("timeOfDay should be set")
 			}
-			assertTimeOfDay(t, tt.name, *st.timeOfDay, tt.wantTime)
+			assertTimeOfDay(t, tt.name, st.tod, tt.wantTime)
 		})
 	}
 }
@@ -369,11 +369,11 @@ func TestMatchCalendarDate(t *testing.T) {
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
-			if st.anchor == nil {
+			if !st.anchorSet {
 				t.Fatal("anchor should be set")
 			}
 			if !st.anchor.Equal(tt.wantAnchor) {
-				t.Errorf("anchor = %v, want %v", *st.anchor, tt.wantAnchor)
+				t.Errorf("anchor = %v, want %v", st.anchor, tt.wantAnchor)
 			}
 		})
 	}
@@ -394,6 +394,9 @@ func TestMatchTimezone(t *testing.T) {
 		{name: "u.t.c.", input: "u.t.c.", wantTZOffset: 0},
 		{name: "utc+05:30", input: "utc+05:30", wantTZOffset: 19800},
 		{name: "utc-04", input: "utc-04", wantTZOffset: -14400},
+		{name: "utc dst", input: "utc dst", wantTZOffset: 3600},
+		{name: "standalone +0530", input: "+0530", wantTZOffset: 19800},
+		{name: "standalone -04:00", input: "-04:00", wantTZOffset: -14400},
 	}
 
 	for _, tt := range tests {
@@ -403,14 +406,14 @@ func TestMatchTimezone(t *testing.T) {
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
-			if st.timeOfDay == nil {
+			if !st.todSet {
 				t.Fatal("timeOfDay should be set by timezone matcher")
 			}
-			if st.timeOfDay.tzOffset == nil {
+			if st.tod.tzOffset == nil {
 				t.Fatal("tzOffset should be set")
 			}
-			if *st.timeOfDay.tzOffset != tt.wantTZOffset {
-				t.Errorf("tzOffset = %d, want %d", *st.timeOfDay.tzOffset, tt.wantTZOffset)
+			if *st.tod.tzOffset != tt.wantTZOffset {
+				t.Errorf("tzOffset = %d, want %d", *st.tod.tzOffset, tt.wantTZOffset)
 			}
 		})
 	}
@@ -439,11 +442,11 @@ func TestMatchNamedRef(t *testing.T) {
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
-			if st.anchor == nil {
+			if !st.anchorSet {
 				t.Fatal("anchor should be set")
 			}
 			if !st.anchor.Equal(tt.wantAnchor) {
-				t.Errorf("anchor = %v, want %v", *st.anchor, tt.wantAnchor)
+				t.Errorf("anchor = %v, want %v", st.anchor, tt.wantAnchor)
 			}
 		})
 	}
@@ -493,11 +496,11 @@ func TestMatchDayOfWeek(t *testing.T) {
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
-			if st.anchor == nil {
+			if !st.anchorSet {
 				t.Fatal("anchor should be set")
 			}
 			if !st.anchor.Equal(tt.wantAnchor) {
-				t.Errorf("anchor = %v, want %v", *st.anchor, tt.wantAnchor)
+				t.Errorf("anchor = %v, want %v", st.anchor, tt.wantAnchor)
 			}
 		})
 	}
@@ -591,11 +594,11 @@ func TestMatchDirectionOp(t *testing.T) {
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
-			if st.anchor == nil {
+			if !st.anchorSet {
 				t.Fatal("anchor should be set")
 			}
 			if !st.anchor.Equal(tt.wantAnchor) {
-				t.Errorf("anchor = %v, want %v", *st.anchor, tt.wantAnchor)
+				t.Errorf("anchor = %v, want %v", st.anchor, tt.wantAnchor)
 			}
 		})
 	}
@@ -649,18 +652,18 @@ func TestMatchPureNumber(t *testing.T) {
 				t.Fatalf("unexpected error: %v", err)
 			}
 			if tt.wantAnchor != nil {
-				if st.anchor == nil {
+				if !st.anchorSet {
 					t.Fatal("anchor should be set")
 				}
 				if !st.anchor.Equal(*tt.wantAnchor) {
-					t.Errorf("anchor = %v, want %v", *st.anchor, *tt.wantAnchor)
+					t.Errorf("anchor = %v, want %v", st.anchor, *tt.wantAnchor)
 				}
 			}
 			if tt.wantTime != nil {
-				if st.timeOfDay == nil {
+				if !st.todSet {
 					t.Fatal("timeOfDay should be set")
 				}
-				assertTimeOfDay(t, tt.name, *st.timeOfDay, *tt.wantTime)
+				assertTimeOfDay(t, tt.name, st.tod, *tt.wantTime)
 			}
 		})
 	}
@@ -699,6 +702,19 @@ func TestMatchNoise(t *testing.T) {
 		})
 	}
 
+	// Test stray hyphen as noise
+	t.Run("stray hyphen", func(t *testing.T) {
+		// "-" alone is noise (not followed by digit immediately)
+		sc := &scanner{input: "-", pos: 0, ref: ref}
+		st, err := sc.scan()
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if st.delta != (delta{}) {
+			t.Errorf("delta should be zero after stray hyphen, got %+v", st.delta)
+		}
+	})
+
 	// Test "yesterday at 3pm" — anchor + time-of-day with noise "at"
 	t.Run("yesterday at 3pm", func(t *testing.T) {
 		sc := &scanner{input: "yesterday at 3pm", pos: 0, ref: ref}
@@ -707,16 +723,16 @@ func TestMatchNoise(t *testing.T) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 		wantAnchor := ref.AddDate(0, 0, -1)
-		if st.anchor == nil {
+		if !st.anchorSet {
 			t.Fatal("anchor should be set")
 		}
 		if !st.anchor.Equal(wantAnchor) {
-			t.Errorf("anchor = %v, want %v", *st.anchor, wantAnchor)
+			t.Errorf("anchor = %v, want %v", st.anchor, wantAnchor)
 		}
-		if st.timeOfDay == nil {
+		if !st.todSet {
 			t.Fatal("timeOfDay should be set")
 		}
-		assertTimeOfDay(t, "yesterday at 3pm", *st.timeOfDay, timeOfDay{15, 0, 0, 0, nil})
+		assertTimeOfDay(t, "yesterday at 3pm", st.tod, timeOfDay{15, 0, 0, 0, nil})
 	})
 }
 

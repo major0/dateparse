@@ -2,7 +2,6 @@ package dateparse
 
 import (
 	"fmt"
-	"strings"
 	"time"
 )
 
@@ -26,7 +25,7 @@ func (d Duration) Apply(t time.Time) time.Time {
 // ParseDuration interprets s as a relative duration expression.
 // Returns the accumulated delta. Errors if an anchor token is present.
 func ParseDuration(s string) (Duration, error) {
-	input := strings.ToLower(s)
+	input := asciiLower(s)
 	sc := &scanner{
 		input:             input,
 		pos:               0,
@@ -37,7 +36,7 @@ func ParseDuration(s string) (Duration, error) {
 	if err != nil {
 		return Duration{}, err
 	}
-	if st.anchor != nil {
+	if st.anchorSet {
 		return Duration{}, fmt.Errorf("ParseDuration: expression contains an anchor (use Parse instead)")
 	}
 	return Duration{

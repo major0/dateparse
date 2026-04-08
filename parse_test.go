@@ -138,6 +138,19 @@ func TestParse_Chained(t *testing.T) {
 	}
 }
 
+func TestParse_TripleChain(t *testing.T) {
+	// "1 day before 2 days after 3 days before 2024-01-15"
+	// = Jan 15 - 3d + 2d - 1d = Jan 13
+	got, err := Parse("1 day before 2 days after 3 days before 2024-01-15", parseRef)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := time.Date(2024, 1, 13, 0, 0, 0, 0, time.UTC)
+	if !got.Equal(want) {
+		t.Errorf("got %v, want %v", got, want)
+	}
+}
+
 func TestParse_Composite_YesterdayAt3PM(t *testing.T) {
 	got, err := Parse("yesterday at 3pm", parseRef)
 	if err != nil {

@@ -2,7 +2,6 @@ package dateparse
 
 import (
 	"fmt"
-	"strings"
 	"time"
 )
 
@@ -16,7 +15,7 @@ func Parse(s string, ref time.Time) (t time.Time, err error) {
 		}
 	}()
 
-	input := strings.ToLower(s)
+	input := asciiLower(s)
 	sc := &scanner{input: input, pos: 0, ref: ref}
 	st, scanErr := sc.scan()
 	if scanErr != nil {

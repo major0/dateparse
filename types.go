@@ -20,8 +20,10 @@ type pendingOp struct {
 // state is the scanner's accumulation register.
 type state struct {
 	delta        delta
-	anchor       *time.Time
-	timeOfDay    *timeOfDay
+	anchor       time.Time
+	anchorSet    bool
+	tod          timeOfDay
+	todSet       bool
 	direction    int         // -1 (before), +1 (after), 0 = no pending direction
 	thisModifier bool        // true when "this" keyword was seen
 	pendingOps   []pendingOp // stack of outer direction ops for chaining
@@ -46,13 +48,6 @@ type unitEntry struct {
 	scale int
 }
 
-// calendarDate holds a parsed date.
-type calendarDate struct {
-	year  int // 4-digit
-	month int // 1-12
-	day   int // 1-31
-}
-
 // timeOfDay holds a parsed time.
 type timeOfDay struct {
 	hour       int // 0-23
@@ -60,10 +55,4 @@ type timeOfDay struct {
 	second     int // 0-59
 	nanosecond int
 	tzOffset   *int // seconds east of UTC, nil = no explicit tz
-}
-
-// dayOfWeekRef holds a day-of-week reference with ordinal modifier.
-type dayOfWeekRef struct {
-	day     time.Weekday
-	ordinal int // 0=this, -1=last, 1=next/first, 2-12=Nth
 }

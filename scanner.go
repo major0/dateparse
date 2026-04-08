@@ -47,28 +47,41 @@ func (sc *scanner) scan() (*state, error) {
 
 // matchNext tries each matcher in priority order and returns the first match.
 func (sc *scanner) matchNext() (int, bool, error) {
-	type matchFunc func() (int, bool, error)
-	for _, m := range []matchFunc{
-		sc.matchComment,      // priority 1
-		sc.matchEpoch,        // priority 2
-		sc.matchRFC3339,      // priority 3
-		sc.matchTimeOfDay,    // priority 4
-		sc.matchCalendarDate, // priority 5
-		sc.matchTimezone,     // priority 6
-		sc.matchNamedRef,     // priority 7
-		sc.matchDayOfWeek,    // priority 8
-		sc.matchRelative,     // priority 9
-		sc.matchDirectionOp,  // priority 10
-		sc.matchPureNumber,   // priority 11
-		sc.matchNoise,        // priority 12
-	} {
-		n, matched, err := m()
-		if err != nil {
-			return 0, false, err
-		}
-		if matched {
-			return n, true, nil
-		}
+	if n, ok, err := sc.matchComment(); ok || err != nil {
+		return n, ok, err
+	}
+	if n, ok, err := sc.matchEpoch(); ok || err != nil {
+		return n, ok, err
+	}
+	if n, ok, err := sc.matchRFC3339(); ok || err != nil {
+		return n, ok, err
+	}
+	if n, ok, err := sc.matchTimeOfDay(); ok || err != nil {
+		return n, ok, err
+	}
+	if n, ok, err := sc.matchCalendarDate(); ok || err != nil {
+		return n, ok, err
+	}
+	if n, ok, err := sc.matchTimezone(); ok || err != nil {
+		return n, ok, err
+	}
+	if n, ok, err := sc.matchNamedRef(); ok || err != nil {
+		return n, ok, err
+	}
+	if n, ok, err := sc.matchDayOfWeek(); ok || err != nil {
+		return n, ok, err
+	}
+	if n, ok, err := sc.matchRelative(); ok || err != nil {
+		return n, ok, err
+	}
+	if n, ok, err := sc.matchDirectionOp(); ok || err != nil {
+		return n, ok, err
+	}
+	if n, ok, err := sc.matchPureNumber(); ok || err != nil {
+		return n, ok, err
+	}
+	if n, ok, err := sc.matchNoise(); ok || err != nil {
+		return n, ok, err
 	}
 	return 0, false, nil
 }
@@ -93,6 +106,29 @@ func (sc *scanner) skipWhitespace() {
 // ---------------------------------------------------------------------------
 // Helper functions
 // ---------------------------------------------------------------------------
+
+// asciiLower returns s with all ASCII uppercase letters converted to lowercase.
+// Avoids the allocation of strings.ToLower for ASCII-only inputs.
+func asciiLower(s string) string {
+	for i := 0; i < len(s); i++ {
+		if s[i] >= 'A' && s[i] <= 'Z' {
+			// Found an uppercase letter — need to allocate.
+			b := make([]byte, len(s))
+			copy(b, s[:i])
+			b[i] = s[i] + 32
+			for j := i + 1; j < len(s); j++ {
+				if s[j] >= 'A' && s[j] <= 'Z' {
+					b[j] = s[j] + 32
+				} else {
+					b[j] = s[j]
+				}
+			}
+			return string(b)
+		}
+	}
+	// Already lowercase — return original string (no allocation).
+	return s
+}
 
 func isDigit(b byte) bool {
 	return b >= '0' && b <= '9'
@@ -212,6 +248,8 @@ func consumeFraction(s string, i int) (int, int) {
 
 // matchComment matches a parenthetical comment with nested parenthesis support.
 // Skips the content without updating state.
+//
+//nolint:unparam // error return is part of the matcher interface contract
 func (sc *scanner) matchComment() (int, bool, error) {
 	s := sc.remaining()
 	if len(s) == 0 || s[0] != '(' {
@@ -702,6 +740,17 @@ func applyDeltaToTime(t time.Time, d delta, sign int) time.Time {
 	return t.Add(dur)
 }
 
+// negateDelta negates all fields of d.
+func negateDelta(d *delta) {
+	d.years = -d.years
+	d.months = -d.months
+	d.days = -d.days
+	d.hours = -d.hours
+	d.minutes = -d.minutes
+	d.seconds = -d.seconds
+	d.nanos = -d.nanos
+}
+
 // resetDelta zeroes out all fields of d.
 func resetDelta(d *delta) {
 	*d = delta{}
@@ -778,7 +827,8 @@ func (sc *scanner) setAnchor(t time.Time) error {
 		}
 		sc.st.pendingOps = nil
 		sc.st.direction = 0
-		sc.st.anchor = &t
+		sc.st.anchor = t
+		sc.st.anchorSet = true
 		return nil
 	}
 	// If there's a pending direction (before/after), apply the accumulated
@@ -787,22 +837,25 @@ func (sc *scanner) setAnchor(t time.Time) error {
 		t = applyDeltaToTime(t, sc.st.delta, sc.st.direction)
 		resetDelta(&sc.st.delta)
 		sc.st.direction = 0
-		sc.st.anchor = &t
+		sc.st.anchor = t
+		sc.st.anchorSet = true
 		return nil
 	}
-	if sc.st.anchor != nil {
+	if sc.st.anchorSet {
 		return fmt.Errorf("conflicting anchor: anchor already set")
 	}
-	sc.st.anchor = &t
+	sc.st.anchor = t
+	sc.st.anchorSet = true
 	return nil
 }
 
 // setTimeOfDay sets the timeOfDay on state, checking for conflicts.
 func (sc *scanner) setTimeOfDay(tod timeOfDay) error {
-	if sc.st.timeOfDay != nil {
+	if sc.st.todSet {
 		return fmt.Errorf("conflicting time-of-day: time already set")
 	}
-	sc.st.timeOfDay = &tod
+	sc.st.tod = tod
+	sc.st.todSet = true
 	return nil
 }
 
@@ -1145,6 +1198,8 @@ func (sc *scanner) matchLiteralMonthDate(s string) (int, bool, error) {
 //   - "utc+05:30", "utc-04" → UTC base + numeric correction
 //   - Standalone numeric: "+0530", "-04:00" etc.
 //   - "DST" suffix → add 3600 to offset
+//
+//nolint:unparam // error return is part of the matcher interface contract
 func (sc *scanner) matchTimezone() (int, bool, error) {
 	s := sc.remaining()
 	if len(s) == 0 {
@@ -1174,8 +1229,8 @@ func (sc *scanner) matchTimezone() (int, bool, error) {
 		if n > 0 {
 			offset = off
 			consumed = n
-			sc.ensureTimeOfDay()
-			sc.st.timeOfDay.tzOffset = &offset
+			sc.st.tod.tzOffset = &offset
+			sc.st.todSet = true
 			return consumed, true, nil
 		}
 		return 0, false, nil
@@ -1204,16 +1259,9 @@ func (sc *scanner) matchTimezone() (int, bool, error) {
 		}
 	}
 
-	sc.ensureTimeOfDay()
-	sc.st.timeOfDay.tzOffset = &offset
+	sc.st.tod.tzOffset = &offset
+	sc.st.todSet = true
 	return consumed, true, nil
-}
-
-// ensureTimeOfDay creates a zero timeOfDay if none exists yet.
-func (sc *scanner) ensureTimeOfDay() {
-	if sc.st.timeOfDay == nil {
-		sc.st.timeOfDay = &timeOfDay{}
-	}
 }
 
 // ---------------------------------------------------------------------------
@@ -1336,6 +1384,8 @@ func (sc *scanner) finishDayOfWeek(s string, consumed int, wd time.Weekday, ordi
 // ---------------------------------------------------------------------------
 
 // matchRelative matches [N] unit_keyword and accumulates into delta.
+//
+//nolint:unparam // error return is part of the matcher interface contract
 func (sc *scanner) matchRelative() (int, bool, error) {
 	s := sc.remaining()
 	if len(s) == 0 {
@@ -1420,13 +1470,7 @@ func (sc *scanner) matchDirectionOp() (int, bool, error) {
 	case "ago":
 		if sc.parseDurationMode {
 			// In duration mode, just negate the delta without setting an anchor.
-			sc.st.delta.years = -sc.st.delta.years
-			sc.st.delta.months = -sc.st.delta.months
-			sc.st.delta.days = -sc.st.delta.days
-			sc.st.delta.hours = -sc.st.delta.hours
-			sc.st.delta.minutes = -sc.st.delta.minutes
-			sc.st.delta.seconds = -sc.st.delta.seconds
-			sc.st.delta.nanos = -sc.st.delta.nanos
+			negateDelta(&sc.st.delta)
 			return wlen, true, nil
 		}
 		// Negate delta, apply to ref as anchor, reset delta.
@@ -1500,7 +1544,7 @@ func (sc *scanner) matchPureNumber() (int, bool, error) {
 	nd := countDigits(s)
 
 	// 8-digit number → yyyymmdd.
-	if nd == 8 && sc.st.anchor == nil {
+	if nd == 8 && !sc.st.anchorSet {
 		year := parseDigits(s[0:4])
 		month := parseDigits(s[4:6])
 		day := parseDigits(s[6:8])
@@ -1515,7 +1559,7 @@ func (sc *scanner) matchPureNumber() (int, bool, error) {
 	}
 
 	// 4-digit number → hhmm.
-	if nd == 4 && sc.st.timeOfDay == nil {
+	if nd == 4 && !sc.st.todSet {
 		hour := parseDigits(s[0:2])
 		minute := parseDigits(s[2:4])
 		if err := validateTime(hour, minute, 0); err != nil {
@@ -1535,6 +1579,8 @@ func (sc *scanner) matchPureNumber() (int, bool, error) {
 // ---------------------------------------------------------------------------
 
 // matchNoise matches noise tokens: "and", "at", bare comma, stray hyphen.
+//
+//nolint:unparam // error return is part of the matcher interface contract
 func (sc *scanner) matchNoise() (int, bool, error) {
 	s := sc.remaining()
 	if len(s) == 0 {

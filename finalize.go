@@ -7,14 +7,14 @@ import "time"
 //nolint:unparam // error return will be used when additional validation is added
 func finalize(st *state, ref time.Time) (time.Time, error) {
 	// Empty state (no tokens matched) → midnight of ref date.
-	if st.anchor == nil && isDeltaZero(st.delta) && st.timeOfDay == nil {
+	if !st.anchorSet && isDeltaZero(st.delta) && !st.todSet {
 		return time.Date(ref.Year(), ref.Month(), ref.Day(), 0, 0, 0, 0, ref.Location()), nil
 	}
 
 	// If no anchor set, use ref as anchor.
 	anchor := ref
-	if st.anchor != nil {
-		anchor = *st.anchor
+	if st.anchorSet {
+		anchor = st.anchor
 	}
 
 	// Apply delta to anchor. Direction has already been applied during scanning,
@@ -22,8 +22,8 @@ func finalize(st *state, ref time.Time) (time.Time, error) {
 	anchor = applyDeltaToTime(anchor, st.delta, 1)
 
 	// If timeOfDay is set, override time component on the anchor.
-	if st.timeOfDay != nil {
-		tod := st.timeOfDay
+	if st.todSet {
+		tod := st.tod
 		year, month, day := anchor.Date()
 		loc := anchor.Location()
 		if tod.tzOffset != nil {
