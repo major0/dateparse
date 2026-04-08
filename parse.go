@@ -1,9 +1,26 @@
 package dateparse
 
-import "time"
+import (
+	"fmt"
+	"strings"
+	"time"
+)
 
 // Parse interprets s as a GNU date-compatible string relative to ref.
 // Returns the resolved time or a descriptive error. Never panics.
-func Parse(_ string, _ time.Time) (time.Time, error) {
-	return time.Time{}, nil
+func Parse(s string, ref time.Time) (t time.Time, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			t = time.Time{}
+			err = fmt.Errorf("internal error: %v", r)
+		}
+	}()
+
+	input := strings.ToLower(s)
+	sc := &scanner{input: input, pos: 0, ref: ref}
+	st, scanErr := sc.scan()
+	if scanErr != nil {
+		return time.Time{}, scanErr
+	}
+	return finalize(st, ref)
 }

@@ -8,10 +8,11 @@ import (
 
 // scanner holds the scanning state.
 type scanner struct {
-	input string    // lowercased
-	pos   int       // current byte offset
-	st    state     // accumulated state
-	ref   time.Time // reference time for resolving anchors
+	input             string    // lowercased
+	pos               int       // current byte offset
+	st                state     // accumulated state
+	ref               time.Time // reference time for resolving anchors
+	parseDurationMode bool      // when true, anchors and direction-to-anchor ops are errors
 }
 
 // scan consumes the entire input and returns the accumulated state.
@@ -35,6 +36,9 @@ func (sc *scanner) scan() (*state, error) {
 	// End-of-scan validation: if direction is -1 or +1 (before/after was set)
 	// but no anchor followed, return error.
 	if sc.st.direction == -1 || sc.st.direction == 1 {
+		return nil, fmt.Errorf("\"before\"/\"after\" without following anchor")
+	}
+	if len(sc.st.pendingOps) > 0 {
 		return nil, fmt.Errorf("\"before\"/\"after\" without following anchor")
 	}
 
@@ -757,6 +761,26 @@ func resolveWeekday(ref time.Time, day time.Weekday, ordinal int) time.Time {
 
 // setAnchor sets the anchor on state, checking for conflicts.
 func (sc *scanner) setAnchor(t time.Time) error {
+	if sc.parseDurationMode {
+		return fmt.Errorf("ParseDuration: expression contains an anchor (use Parse instead)")
+	}
+	// If there are pending direction ops, apply them in reverse order (innermost first).
+	if len(sc.st.pendingOps) > 0 {
+		// First apply any remaining delta with the current direction.
+		if !isDeltaZero(sc.st.delta) {
+			t = applyDeltaToTime(t, sc.st.delta, sc.st.direction)
+			resetDelta(&sc.st.delta)
+		}
+		// Apply stacked ops in reverse order.
+		for i := len(sc.st.pendingOps) - 1; i >= 0; i-- {
+			op := sc.st.pendingOps[i]
+			t = applyDeltaToTime(t, op.d, op.dir)
+		}
+		sc.st.pendingOps = nil
+		sc.st.direction = 0
+		sc.st.anchor = &t
+		return nil
+	}
 	// If there's a pending direction (before/after), apply the accumulated
 	// delta to this anchor.
 	if sc.st.direction == -1 || sc.st.direction == 1 {
@@ -1394,6 +1418,17 @@ func (sc *scanner) matchDirectionOp() (int, bool, error) {
 
 	switch word {
 	case "ago":
+		if sc.parseDurationMode {
+			// In duration mode, just negate the delta without setting an anchor.
+			sc.st.delta.years = -sc.st.delta.years
+			sc.st.delta.months = -sc.st.delta.months
+			sc.st.delta.days = -sc.st.delta.days
+			sc.st.delta.hours = -sc.st.delta.hours
+			sc.st.delta.minutes = -sc.st.delta.minutes
+			sc.st.delta.seconds = -sc.st.delta.seconds
+			sc.st.delta.nanos = -sc.st.delta.nanos
+			return wlen, true, nil
+		}
 		// Negate delta, apply to ref as anchor, reset delta.
 		t := applyDeltaToTime(sc.ref, sc.st.delta, -1)
 		resetDelta(&sc.st.delta)
@@ -1403,6 +1438,10 @@ func (sc *scanner) matchDirectionOp() (int, bool, error) {
 		return wlen, true, nil
 
 	case "hence":
+		if sc.parseDurationMode {
+			// In duration mode, delta stays positive — nothing to do.
+			return wlen, true, nil
+		}
 		// Apply delta to ref as anchor (positive), reset delta.
 		t := applyDeltaToTime(sc.ref, sc.st.delta, 1)
 		resetDelta(&sc.st.delta)
@@ -1412,16 +1451,32 @@ func (sc *scanner) matchDirectionOp() (int, bool, error) {
 		return wlen, true, nil
 
 	case "before":
+		if sc.parseDurationMode {
+			// In duration mode, "before" requires an anchor — error.
+			return 0, false, fmt.Errorf("ParseDuration: \"before\" not allowed in duration expression (use Parse instead)")
+		}
 		if isDeltaZero(sc.st.delta) {
 			return 0, false, fmt.Errorf("\"before\" without preceding delta")
 		}
+		// Push the current delta+direction onto the pending stack.
+		// For the first direction op (direction==0), this captures the delta
+		// that precedes "before". For chained ops, it captures the intermediate delta.
+		sc.st.pendingOps = append(sc.st.pendingOps, pendingOp{d: sc.st.delta, dir: -1})
+		resetDelta(&sc.st.delta)
 		sc.st.direction = -1
 		return wlen, true, nil
 
 	case "after":
+		if sc.parseDurationMode {
+			// In duration mode, "after" requires an anchor — error.
+			return 0, false, fmt.Errorf("ParseDuration: \"after\" not allowed in duration expression (use Parse instead)")
+		}
 		if isDeltaZero(sc.st.delta) {
 			return 0, false, fmt.Errorf("\"after\" without preceding delta")
 		}
+		// Push the current delta+direction onto the pending stack.
+		sc.st.pendingOps = append(sc.st.pendingOps, pendingOp{d: sc.st.delta, dir: 1})
+		resetDelta(&sc.st.delta)
 		sc.st.direction = 1
 		return wlen, true, nil
 	}

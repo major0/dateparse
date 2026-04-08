@@ -11,13 +11,20 @@ type delta struct {
 	nanos                   int
 }
 
+// pendingOp holds a delta and direction that is waiting for an anchor.
+type pendingOp struct {
+	d   delta
+	dir int // -1 or +1
+}
+
 // state is the scanner's accumulation register.
 type state struct {
 	delta        delta
 	anchor       *time.Time
 	timeOfDay    *timeOfDay
-	direction    int  // -1 (before), +1 (after), 0 = no pending direction
-	thisModifier bool // true when "this" keyword was seen
+	direction    int         // -1 (before), +1 (after), 0 = no pending direction
+	thisModifier bool        // true when "this" keyword was seen
+	pendingOps   []pendingOp // stack of outer direction ops for chaining
 }
 
 // deltaField identifies which field of a delta a unit maps to.
