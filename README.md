@@ -1,57 +1,72 @@
 # dateparse
 
-GNU `date --date` compatible timestamp parser for Go.
+A GNU `date --date` compatible timestamp parser and time calculator for Go. Parses human-readable date/time expressions into `time.Time` values using a single-pass scan+accumulate architecture with zero dependencies beyond the Go standard library.
+
+## Features
+
+- Full GNU `date --date` input format compatibility
+- Direction operators: `before`, `after`, `ago`, `hence` with chaining support
+- 30+ time units including historical and humorous units (ghurry, scruple, helek, microfortnight, etc.)
+- Single-pass left-to-right scanner — no intermediate token list, no recursion
+- Multi-field calendar-correct delta arithmetic via `time.AddDate` + `time.Add`
+- Case-insensitive, whitespace-tolerant, parenthetical comment support
+- Never panics on any input
+
+## Parse
+
+Resolves a date/time expression to an absolute `time.Time`.
+
+```go
+t, err := dateparse.Parse("3 days before Jan 15, 2025", time.Now())
+t, err := dateparse.Parse("last monday 3pm", time.Now())
+t, err := dateparse.Parse("7 hours before 2 weeks after July 13", time.Now())
+```
+
+See [docs/parse.md](docs/parse.md) for the full format reference.
+
+## ParseDuration
+
+Resolves a relative expression to a `dateparse.Duration` with separate calendar and sub-day fields.
+
+```go
+d, err := dateparse.ParseDuration("1 year 2 months 3 days")
+result := d.Apply(time.Now())
+```
+
+See [docs/parse-duration.md](docs/parse-duration.md) for details.
+
+## gdate CLI
+
+A GNU `date`-compatible command-line tool.
+
+```sh
+gdate -d "3 days before Jan 15, 2025"
+gdate -d "last monday 3pm" +"%Y-%m-%d %H:%M"
+gdate -o "2 weeks and 3 days"
+```
+
+See [docs/gdate.md](docs/gdate.md) for the full CLI reference.
 
 ## Install
+
+Library:
 
 ```sh
 go get github.com/major0/dateparse
 ```
 
-## Usage
-
-```go
-package main
-
-import (
-	"fmt"
-	"time"
-
-	"github.com/major0/dateparse"
-)
-
-func main() {
-	t, err := dateparse.Parse("3 days ago", time.Now())
-	if err != nil {
-		panic(err)
-	}
-	fmt.Println(t)
-}
-```
-
-## gdate CLI
-
-A GNU `date`-compatible CLI tool for testing and interactive use.
+CLI:
 
 ```sh
 go install github.com/major0/dateparse/cmd/gdate@latest
-
-gdate --date "last monday 3pm"
-gdate --date "2024-01-15" +"%Y-%m-%d"
-gdate --date "3 days ago"
 ```
 
-## Supported Formats
+## Documentation
 
-- RFC 3339 / ISO 8601: `2024-01-15T14:30:00Z`
-- Calendar dates: `Jan 15 2024`, `15 Jan 2024`, `2024-01-15`, `1/15/2024`
-- Time of day: `14:30`, `3pm`, `3:30 a.m.`
-- Named references: `now`, `today`, `yesterday`, `tomorrow`
-- Relative items: `3 days ago`, `2 hours hence`, `1 year 2 months`
-- Day-of-week: `last monday`, `next friday`, `third tuesday`
-- Epoch seconds: `@1705276800`
-- Composable: `last monday 3pm`, `yesterday at 10am`, `2pm 3 days hence`
-- Historical units: ghurry, scruple, mileway, microfortnight, nundine, lustre, and more
+- [Parse — format reference and examples](docs/parse.md)
+- [ParseDuration — duration expressions and the Duration type](docs/parse-duration.md)
+- [gdate — CLI reference and examples](docs/gdate.md)
+- [Units — full conversion table with all supported time units](docs/units.md)
 
 ## License
 
