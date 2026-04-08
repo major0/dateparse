@@ -59,9 +59,3 @@ type dayOfWeekRef struct {
 	day     time.Weekday
 	ordinal int // 0=this, -1=last, 1=next/first, 2-12=Nth
 }
-
-// epochSeconds holds a parsed Unix epoch timestamp.
-type epochSeconds struct {
-	seconds    int64
-	nanosecond int
-}

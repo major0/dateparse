@@ -41,6 +41,40 @@ func assertTimeOfDay(t *testing.T, label string, got, want timeOfDay) {
 // ref is a fixed reference time used across scanner tests.
 var ref = time.Date(2024, 6, 15, 12, 0, 0, 0, time.UTC)
 
+func TestScanEmptyInput(t *testing.T) {
+	sc := &scanner{input: "", pos: 0, ref: ref}
+	st, err := sc.scan()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if st.anchor != nil {
+		t.Error("anchor should be nil for empty input")
+	}
+	if st.timeOfDay != nil {
+		t.Error("timeOfDay should be nil for empty input")
+	}
+	if st.delta != (delta{}) {
+		t.Errorf("delta should be zero, got %+v", st.delta)
+	}
+}
+
+func TestScanWhitespaceOnly(t *testing.T) {
+	sc := &scanner{input: "   \t\n  ", pos: 0, ref: ref}
+	st, err := sc.scan()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if st.anchor != nil {
+		t.Error("anchor should be nil for whitespace-only input")
+	}
+	if st.timeOfDay != nil {
+		t.Error("timeOfDay should be nil for whitespace-only input")
+	}
+	if st.delta != (delta{}) {
+		t.Errorf("delta should be zero, got %+v", st.delta)
+	}
+}
+
 func TestMatchComment(t *testing.T) {
 	tests := []struct {
 		name    string

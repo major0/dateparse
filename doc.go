@@ -12,5 +12,4 @@ package dateparse
 var (
 	_ calendarDate = calendarDate{}
 	_ dayOfWeekRef = dayOfWeekRef{}
-	_ epochSeconds = epochSeconds{}
 )
