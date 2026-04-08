@@ -12,3 +12,6 @@ coverage.html
 .vscode/
 *.swp
 *~
+
+# Profiling
+*.prof
