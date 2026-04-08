@@ -1,24 +1,16 @@
 // Package dateparse provides GNU date --date compatible timestamp parsing.
 //
-// The parser uses a scanner/accumulator/resolver architecture:
-// a greedy longest-match scanner consumes items left-to-right,
-// an accumulator collects them with conflict detection,
-// and a resolver combines accumulated items with a reference time
-// to produce the final time.Time.
+// The parser uses a single-pass scan+accumulate architecture:
+// a greedy longest-match scanner reads left-to-right, matches one token
+// at a time, and updates state inline. No intermediate token list.
+// Units accumulate into a multi-field delta with separate calendar fields
+// applied via time.AddDate and sub-day fields applied via time.Add.
 package dateparse
 
-// TODO: Remove these compile-time assertions once scanner/accumulator/resolver
-// consume all types. They exist only to suppress unused warnings during
-// incremental development.
+// Compile-time assertions to suppress unused warnings during incremental
+// development. Remove once all types are consumed by production code.
 var (
-	_ itemType     = itemComment
-	_ item         = item{}
 	_ calendarDate = calendarDate{}
-	_ timeOfDay    = timeOfDay{}
-	_ timeZone     = timeZone{}
-	_ relativeUnit = unitMoment
-	_ relativeItem = relativeItem{}
-	_ namedRefType = namedTomorrow
 	_ dayOfWeekRef = dayOfWeekRef{}
 	_ epochSeconds = epochSeconds{}
 )

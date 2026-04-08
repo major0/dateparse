@@ -2,26 +2,40 @@ package dateparse
 
 import "time"
 
-// itemType classifies a parsed token.
-type itemType int
+// delta accumulates offsets with separate calendar and sub-day fields.
+// Calendar fields (years, months, days) are applied via time.AddDate.
+// Sub-day fields (hours, minutes, seconds, nanos) are applied via time.Add.
+type delta struct {
+	years, months, days     int
+	hours, minutes, seconds int
+	nanos                   int
+}
+
+// state is the scanner's accumulation register.
+type state struct {
+	delta     delta
+	anchor    *time.Time
+	timeOfDay *timeOfDay
+	direction int // +1 or -1, default +1
+}
+
+// deltaField identifies which field of a delta a unit maps to.
+type deltaField int
 
 const (
-	itemCalendarDate itemType = iota
-	itemTimeOfDay
-	itemTimeZone
-	itemRelative
-	itemNamedRef
-	itemDayOfWeek
-	itemEpoch
-	itemPureNumber
-	itemComment
+	fieldYears deltaField = iota
+	fieldMonths
+	fieldDays
+	fieldHours
+	fieldMinutes
+	fieldSeconds
+	fieldNanos
 )
 
-// item represents a single parsed token from the input.
-type item struct {
-	typ   itemType
-	value interface{} // type-specific payload
-	pos   int         // byte offset in original input
+// unitEntry maps a unit keyword to a delta field and scale factor.
+type unitEntry struct {
+	field deltaField
+	scale int
 }
 
 // calendarDate holds a parsed date.
@@ -39,54 +53,6 @@ type timeOfDay struct {
 	nanosecond int
 	tzOffset   *int // seconds east of UTC, nil = no explicit tz
 }
-
-// timeZone holds a parsed timezone offset.
-type timeZone struct {
-	offsetSeconds int
-}
-
-// relativeUnit identifies a time unit for relative offsets.
-type relativeUnit int
-
-const (
-	unitSecond relativeUnit = iota
-	unitMinute
-	unitHour
-	unitDay
-	unitWeek
-	unitFortnight
-	unitMonth
-	unitYear
-	unitGhurry
-	unitScruple
-	unitMileway
-	unitMicrofortnight
-	unitNundine
-	unitDecade
-	unitCentury
-	unitMillennium
-	unitOlympiad
-	unitIndiction
-	unitLustre
-	unitJiffy
-	unitMoment
-)
-
-// relativeItem holds a signed multiplier and unit for relative offsets.
-type relativeItem struct {
-	n    int // signed multiplier
-	unit relativeUnit
-}
-
-// namedRefType identifies a named reference keyword.
-type namedRefType int
-
-const (
-	namedNow       namedRefType = iota // zero displacement
-	namedToday                         // zero displacement
-	namedYesterday                     // -1 day
-	namedTomorrow                      // +1 day
-)
 
 // dayOfWeekRef holds a day-of-week reference with ordinal modifier.
 type dayOfWeekRef struct {
