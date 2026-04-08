@@ -7,9 +7,9 @@
 // to produce the final time.Time.
 package dateparse
 
-// Compile-time assertions to suppress unused warnings for types
-// that are defined now but consumed by scanner/accumulator/resolver
-// in later implementation stages.
+// TODO: Remove these compile-time assertions once scanner/accumulator/resolver
+// consume all types. They exist only to suppress unused warnings during
+// incremental development.
 var (
 	_ itemType     = itemComment
 	_ item         = item{}

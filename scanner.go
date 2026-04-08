@@ -37,10 +37,10 @@ func (sc *scanner) scan() ([]item, error) {
 func (sc *scanner) matchNext() ([]item, int, error) {
 	type matchFunc func() ([]item, int, error)
 	for _, m := range []matchFunc{
-		sc.matchCommentItems,
-		sc.matchEpochItems,
-		sc.matchRFC3339Items,
-		sc.matchTimeOfDayItems,
+		sc.matchComment,
+		sc.matchEpoch,
+		sc.matchRFC3339,
+		sc.matchTimeOfDay,
 	} {
 		its, n, err := m()
 		if err != nil {
@@ -83,8 +83,10 @@ func isAlpha(b byte) bool {
 }
 
 // parseDigits parses a run of ASCII digits from s into an int.
-func parseDigits(s string) (int, error) {
-	return strconv.Atoi(s)
+// Callers must ensure s contains only digits (validated via countDigits).
+func parseDigits(s string) int {
+	n, _ := strconv.Atoi(s)
+	return n
 }
 
 // countDigits returns the number of leading ASCII digits in s.
@@ -112,22 +114,48 @@ func daysInMonth(year, month int) int {
 	return 0
 }
 
+// validateDate checks that year/month/day form a valid date.
+func validateDate(year, month, day int) error {
+	if month < 1 || month > 12 {
+		return fmt.Errorf("invalid month: %d (expected 1-12)", month)
+	}
+	maxDay := daysInMonth(year, month)
+	if day < 1 || day > maxDay {
+		return fmt.Errorf("invalid day: %d (expected 1-%d for month %d)", day, maxDay, month)
+	}
+	return nil
+}
+
+// validateTime checks that hour/minute/second are in valid ranges.
+func validateTime(hour, minute, second int) error {
+	if hour > 23 {
+		return fmt.Errorf("invalid hour: %d (expected 0-23)", hour)
+	}
+	if minute > 59 {
+		return fmt.Errorf("invalid minute: %d (expected 0-59)", minute)
+	}
+	if second > 59 {
+		return fmt.Errorf("invalid second: %d (expected 0-59)", second)
+	}
+	return nil
+}
+
 // parseFraction parses a fractional seconds string (digits after '.' or ',')
-// and returns nanoseconds.
+// and returns nanoseconds. Truncates to 9 digits of precision.
 func parseFraction(s string) int {
 	if len(s) == 0 {
 		return 0
 	}
-	// Pad or truncate to 9 digits for nanosecond precision.
-	padded := s
-	if len(padded) > 9 {
-		padded = padded[:9]
+	// Truncate to 9 digits.
+	if len(s) > 9 {
+		s = s[:9]
 	}
-	for len(padded) < 9 {
-		padded += "0"
+	n, _ := strconv.Atoi(s)
+	// Scale up: if s has fewer than 9 digits, multiply by 10^(9-len(s)).
+	for i := len(s); i < 9; i++ {
+		n *= 10
 	}
-	ns, _ := strconv.Atoi(padded)
-	return ns
+	return n
 }
 
 // consumeSeconds tries to consume ":SS" at position i in s.
@@ -135,7 +163,7 @@ func parseFraction(s string) int {
 func consumeSeconds(s string, i int) (int, int) {
 	if i < len(s) && s[i] == ':' {
 		if i+2 < len(s) && isDigit(s[i+1]) && isDigit(s[i+2]) {
-			sec, _ := parseDigits(s[i+1 : i+3])
+			sec := parseDigits(s[i+1 : i+3])
 			return sec, i + 3
 		}
 	}
@@ -162,20 +190,11 @@ func consumeFraction(s string, i int) (int, int) {
 // matchComment — priority 1: parenthetical comments
 // ---------------------------------------------------------------------------
 
-// matchCommentItems wraps matchComment to return the []item, int, error form.
-func (sc *scanner) matchCommentItems() ([]item, int, error) {
-	it, n, ok := sc.matchComment()
-	if !ok {
-		return nil, 0, nil
-	}
-	return []item{it}, n, nil
-}
-
 // matchComment matches a parenthetical comment with nested parenthesis support.
-func (sc *scanner) matchComment() (item, int, bool) {
+func (sc *scanner) matchComment() ([]item, int, error) {
 	s := sc.remaining()
 	if len(s) == 0 || s[0] != '(' {
-		return item{}, 0, false
+		return nil, 0, nil
 	}
 	depth := 0
 	for i := 0; i < len(s); i++ {
@@ -185,45 +204,33 @@ func (sc *scanner) matchComment() (item, int, bool) {
 		case ')':
 			depth--
 			if depth == 0 {
-				return item{
+				return []item{{
 					typ:   itemComment,
 					value: s[1:i], // content without outer parens
 					pos:   sc.pos,
-				}, i + 1, true
+				}}, i + 1, nil
 			}
 		}
 	}
 	// Unmatched opening paren — not a valid comment.
-	return item{}, 0, false
+	return nil, 0, nil
 }
 
 // ---------------------------------------------------------------------------
 // matchEpoch — priority 2: @<seconds>[.fraction]
 // ---------------------------------------------------------------------------
 
-// matchEpochItems wraps matchEpoch to return the []item, int, error form.
-func (sc *scanner) matchEpochItems() ([]item, int, error) {
-	it, n, err := sc.matchEpoch()
-	if err != nil {
-		return nil, 0, err
-	}
-	if n == 0 {
-		return nil, 0, nil
-	}
-	return []item{it}, n, nil
-}
-
 // matchEpoch matches '@' followed by optional sign and digits, optional
-// fractional part ('.' or ','). Returns (item, bytesConsumed, error).
-func (sc *scanner) matchEpoch() (item, int, error) {
+// fractional part ('.' or ','). Returns ([]item, bytesConsumed, error).
+func (sc *scanner) matchEpoch() ([]item, int, error) {
 	s := sc.remaining()
 	if len(s) == 0 || s[0] != '@' {
-		return item{}, 0, nil
+		return nil, 0, nil
 	}
 
 	i := 1 // skip '@'
 	if i >= len(s) {
-		return item{}, 0, nil
+		return nil, 0, nil
 	}
 
 	// Optional sign.
@@ -242,12 +249,12 @@ func (sc *scanner) matchEpoch() (item, int, error) {
 		i++
 	}
 	if i == digitStart {
-		return item{}, 0, nil
+		return nil, 0, nil
 	}
 
 	sec, err := strconv.ParseInt(s[digitStart:i], 10, 64)
 	if err != nil {
-		return item{}, 0, fmt.Errorf("invalid epoch seconds: %w", err)
+		return nil, 0, fmt.Errorf("invalid epoch seconds: %w", err)
 	}
 	if negative {
 		sec = -sec
@@ -257,29 +264,16 @@ func (sc *scanner) matchEpoch() (item, int, error) {
 	ns := 0
 	ns, i = consumeFraction(s, i)
 
-	return item{
+	return []item{{
 		typ:   itemEpoch,
 		value: epochSeconds{seconds: sec, nanosecond: ns},
 		pos:   sc.pos,
-	}, i, nil
+	}}, i, nil
 }
 
 // ---------------------------------------------------------------------------
 // matchRFC3339 — priority 3: YYYY-MM-DDTHH:MM:SS[.frac][tz]
 // ---------------------------------------------------------------------------
-
-// matchRFC3339Items wraps matchRFC3339 to return the []item, int, error form.
-// RFC 3339 produces BOTH a calendarDate item AND a timeOfDay item.
-func (sc *scanner) matchRFC3339Items() ([]item, int, error) {
-	items, n, err := sc.matchRFC3339()
-	if err != nil {
-		return nil, 0, err
-	}
-	if n == 0 {
-		return nil, 0, nil
-	}
-	return items, n, nil
-}
 
 // matchRFC3339 matches YYYY-MM-DDTHH:MM:SS with optional fractional seconds
 // and timezone offset. Accepts space as equivalent to 'T'. Returns two items
@@ -328,11 +322,11 @@ func (sc *scanner) matchRFC3339() ([]item, int, error) {
 		return nil, 0, nil
 	}
 
-	year, _ := parseDigits(s[0:4])
-	month, _ := parseDigits(s[5:7])
-	day, _ := parseDigits(s[8:10])
-	hour, _ := parseDigits(s[11:13])
-	minute, _ := parseDigits(s[14:16])
+	year := parseDigits(s[0:4])
+	month := parseDigits(s[5:7])
+	day := parseDigits(s[8:10])
+	hour := parseDigits(s[11:13])
+	minute := parseDigits(s[14:16])
 
 	i := 16
 	second := 0
@@ -355,23 +349,13 @@ func (sc *scanner) matchRFC3339() ([]item, int, error) {
 	}
 
 	// Validate date components.
-	if month < 1 || month > 12 {
-		return nil, 0, fmt.Errorf("invalid month: %d (expected 1-12)", month)
-	}
-	maxDay := daysInMonth(year, month)
-	if day < 1 || day > maxDay {
-		return nil, 0, fmt.Errorf("invalid day: %d (expected 1-%d for month %d)", day, maxDay, month)
+	if err := validateDate(year, month, day); err != nil {
+		return nil, 0, err
 	}
 
 	// Validate time components.
-	if hour > 23 {
-		return nil, 0, fmt.Errorf("invalid hour: %d (expected 0-23)", hour)
-	}
-	if minute > 59 {
-		return nil, 0, fmt.Errorf("invalid minute: %d (expected 0-59)", minute)
-	}
-	if second > 59 {
-		return nil, 0, fmt.Errorf("invalid second: %d (expected 0-59)", second)
+	if err := validateTime(hour, minute, second); err != nil {
+		return nil, 0, err
 	}
 
 	dateItem := item{
@@ -420,17 +404,17 @@ func parseTZSuffix(s string) (int, int) {
 	switch {
 	case nd >= 2 && len(rest) > 2 && rest[2] == ':' && len(rest) > 4 && countDigits(rest[3:]) >= 2:
 		// +HH:MM
-		hh, _ := parseDigits(rest[0:2])
-		mm, _ := parseDigits(rest[3:5])
+		hh := parseDigits(rest[0:2])
+		mm := parseDigits(rest[3:5])
 		return sign * (hh*3600 + mm*60), 6 // sign + HH:MM
 	case nd >= 4:
 		// +HHMM
-		hh, _ := parseDigits(rest[0:2])
-		mm, _ := parseDigits(rest[2:4])
+		hh := parseDigits(rest[0:2])
+		mm := parseDigits(rest[2:4])
 		return sign * (hh*3600 + mm*60), 5 // sign + HHMM
 	case nd >= 2:
 		// +HH
-		hh, _ := parseDigits(rest[0:2])
+		hh := parseDigits(rest[0:2])
 		return sign * (hh * 3600), 3 // sign + HH
 	}
 
@@ -441,62 +425,50 @@ func parseTZSuffix(s string) (int, int) {
 // matchTimeOfDay — priority 4
 // ---------------------------------------------------------------------------
 
-// matchTimeOfDayItems wraps matchTimeOfDay to return the []item, int, error form.
-func (sc *scanner) matchTimeOfDayItems() ([]item, int, error) {
-	it, n, err := sc.matchTimeOfDay()
-	if err != nil {
-		return nil, 0, err
-	}
-	if n == 0 {
-		return nil, 0, nil
-	}
-	return []item{it}, n, nil
-}
-
 // matchTimeOfDay matches time-of-day in these formats:
 //   - HH:MM, HH:MM:SS, HH:MM:SS.fraction
 //   - 12-hour: Npm, Npm, N:MMam, N:MMpm (also a.m./p.m.)
 //   - Optional trailing timezone correction
 //   - Rejects am/pm combined with timezone correction
-func (sc *scanner) matchTimeOfDay() (item, int, error) {
+func (sc *scanner) matchTimeOfDay() ([]item, int, error) {
 	s := sc.remaining()
 	if len(s) == 0 {
-		return item{}, 0, nil
+		return nil, 0, nil
 	}
 
 	// Try 24-hour format first: HH:MM...
-	if it, n, err := sc.matchTime24(s); n > 0 || err != nil {
-		return it, n, err
+	if its, n, err := sc.matchTime24(s); n > 0 || err != nil {
+		return its, n, err
 	}
 
 	// Try 12-hour format: N[N][:MM]am/pm
-	if it, n, err := sc.matchTime12(s); n > 0 || err != nil {
-		return it, n, err
+	if its, n, err := sc.matchTime12(s); n > 0 || err != nil {
+		return its, n, err
 	}
 
-	return item{}, 0, nil
+	return nil, 0, nil
 }
 
 // matchTime24 matches 24-hour time: HH:MM[:SS[.frac]][tz]
-func (sc *scanner) matchTime24(s string) (item, int, error) {
+func (sc *scanner) matchTime24(s string) ([]item, int, error) {
 	// Need at least H:MM (4 chars) or HH:MM (5 chars).
 	nd := countDigits(s)
 	if nd < 1 || nd > 2 {
-		return item{}, 0, nil
+		return nil, 0, nil
 	}
 
 	// Must have colon after the hour digits.
 	if nd >= len(s) || s[nd] != ':' {
-		return item{}, 0, nil
+		return nil, 0, nil
 	}
 
 	// Must have two digits after the colon.
 	if nd+3 > len(s) || !isDigit(s[nd+1]) || !isDigit(s[nd+2]) {
-		return item{}, 0, nil
+		return nil, 0, nil
 	}
 
-	hour, _ := parseDigits(s[0:nd])
-	minute, _ := parseDigits(s[nd+1 : nd+3])
+	hour := parseDigits(s[0:nd])
+	minute := parseDigits(s[nd+1 : nd+3])
 	i := nd + 3
 
 	second := 0
@@ -513,7 +485,7 @@ func (sc *scanner) matchTime24(s string) (item, int, error) {
 	if i < len(s) {
 		rest := s[i:]
 		if hasAMPMPrefix(rest) {
-			return item{}, 0, nil
+			return nil, 0, nil
 		}
 	}
 
@@ -533,31 +505,25 @@ func (sc *scanner) matchTime24(s string) (item, int, error) {
 	}
 
 	// Validate.
-	if hour > 23 {
-		return item{}, 0, fmt.Errorf("invalid hour: %d (expected 0-23)", hour)
-	}
-	if minute > 59 {
-		return item{}, 0, fmt.Errorf("invalid minute: %d (expected 0-59)", minute)
-	}
-	if second > 59 {
-		return item{}, 0, fmt.Errorf("invalid second: %d (expected 0-59)", second)
+	if err := validateTime(hour, minute, second); err != nil {
+		return nil, 0, err
 	}
 
-	return item{
+	return []item{{
 		typ:   itemTimeOfDay,
 		value: timeOfDay{hour: hour, minute: minute, second: second, nanosecond: ns, tzOffset: tzOff},
 		pos:   sc.pos,
-	}, i, nil
+	}}, i, nil
 }
 
 // matchTime12 matches 12-hour time: N[N][:MM[:SS[.frac]]] am/pm/a.m./p.m.
-func (sc *scanner) matchTime12(s string) (item, int, error) {
+func (sc *scanner) matchTime12(s string) ([]item, int, error) {
 	nd := countDigits(s)
 	if nd < 1 || nd > 2 {
-		return item{}, 0, nil
+		return nil, 0, nil
 	}
 
-	hour, _ := parseDigits(s[0:nd])
+	hour := parseDigits(s[0:nd])
 	i := nd
 	minute := 0
 	second := 0
@@ -566,7 +532,7 @@ func (sc *scanner) matchTime12(s string) (item, int, error) {
 	// Optional :MM
 	if i < len(s) && s[i] == ':' {
 		if i+2 < len(s) && isDigit(s[i+1]) && isDigit(s[i+2]) {
-			minute, _ = parseDigits(s[i+1 : i+3])
+			minute = parseDigits(s[i+1 : i+3])
 			i += 3
 
 			// Optional :SS
@@ -586,19 +552,19 @@ func (sc *scanner) matchTime12(s string) (item, int, error) {
 	// Must have am/pm suffix.
 	isPM, ampmLen := parseAMPM(s[j:])
 	if ampmLen == 0 {
-		return item{}, 0, nil
+		return nil, 0, nil
 	}
 	i = j + ampmLen
 
 	// Validate 12-hour range.
 	if hour < 1 || hour > 12 {
-		return item{}, 0, fmt.Errorf("invalid hour: %d (expected 1-12 for 12-hour format)", hour)
+		return nil, 0, fmt.Errorf("invalid hour: %d (expected 1-12 for 12-hour format)", hour)
 	}
 	if minute > 59 {
-		return item{}, 0, fmt.Errorf("invalid minute: %d (expected 0-59)", minute)
+		return nil, 0, fmt.Errorf("invalid minute: %d (expected 0-59)", minute)
 	}
 	if second > 59 {
-		return item{}, 0, fmt.Errorf("invalid second: %d (expected 0-59)", second)
+		return nil, 0, fmt.Errorf("invalid second: %d (expected 0-59)", second)
 	}
 
 	// Convert to 24-hour.
@@ -619,15 +585,15 @@ func (sc *scanner) matchTime12(s string) (item, int, error) {
 	if afterAMPM < len(s) {
 		_, tzN := parseTZSuffix(s[afterAMPM:])
 		if tzN > 0 {
-			return item{}, 0, fmt.Errorf("am/pm cannot combine with timezone correction")
+			return nil, 0, fmt.Errorf("am/pm cannot combine with timezone correction")
 		}
 	}
 
-	return item{
+	return []item{{
 		typ:   itemTimeOfDay,
 		value: timeOfDay{hour: hour, minute: minute, second: second, nanosecond: ns, tzOffset: nil},
 		pos:   sc.pos,
-	}, i, nil
+	}}, i, nil
 }
 
 // hasAMPMPrefix checks if s starts with an am/pm indicator.
