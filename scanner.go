@@ -879,6 +879,45 @@ func addToDelta(d *delta, field deltaField, n int) {
 	}
 }
 
+// cascadeScale maps each field to {next smaller field, multiplier to convert}.
+// years→months(×12), months→days(×30), days→hours(×24),
+// hours→minutes(×60), minutes→seconds(×60), seconds→nanos(×1e9).
+var cascadeScale = [...]struct {
+	next deltaField
+	mult float64
+}{
+	fieldYears:   {fieldMonths, 12},
+	fieldMonths:  {fieldDays, 30},
+	fieldDays:    {fieldHours, 24},
+	fieldHours:   {fieldMinutes, 60},
+	fieldMinutes: {fieldSeconds, 60},
+	fieldSeconds: {fieldNanos, 1e9},
+	fieldNanos:   {fieldNanos, 0}, // terminal
+}
+
+// addFractionalToDelta adds a floating-point value to the delta, cascading
+// the fractional remainder into progressively smaller fields.
+// E.g. 2.5 days → 2 days + 12 hours.
+func addFractionalToDelta(d *delta, field deltaField, val float64) {
+	for field <= fieldNanos {
+		whole := int(val)
+		if val < 0 && float64(whole) != val {
+			whole-- // floor toward negative infinity
+		}
+		addToDelta(d, field, whole)
+		frac := val - float64(whole)
+		if frac == 0 || field == fieldNanos {
+			break
+		}
+		cs := cascadeScale[field]
+		if cs.mult == 0 {
+			break
+		}
+		field = cs.next
+		val = frac * cs.mult
+	}
+}
+
 // extractMonthWord tries to extract a month name (possibly with trailing period)
 // from s. Returns (monthNumber, bytesConsumed) or (0, 0) if no match.
 func extractMonthWord(s string) (int, int) {
@@ -1393,12 +1432,13 @@ func (sc *scanner) matchRelative() (int, bool, error) {
 	}
 
 	consumed := 0
-	multiplier := 1
+	var multiplier float64 = 1
 	hasNumber := false
+	isFractional := false
 
-	// Try to parse an optional signed integer.
+	// Try to parse an optional signed number (integer or decimal).
 	if s[0] == '+' || s[0] == '-' || isDigit(s[0]) {
-		sign := 1
+		sign := float64(1)
 		i := 0
 		switch s[0] {
 		case '+':
@@ -1409,9 +1449,27 @@ func (sc *scanner) matchRelative() (int, bool, error) {
 		}
 		nd := countDigits(s[i:])
 		if nd > 0 {
-			multiplier = sign * parseDigits(s[i:i+nd])
+			multiplier = sign * float64(parseDigits(s[i:i+nd]))
 			consumed = i + nd
 			hasNumber = true
+			// Check for decimal point.
+			if consumed < len(s) && s[consumed] == '.' {
+				consumed++ // skip '.'
+				fd := countDigits(s[consumed:])
+				if fd > 0 {
+					frac := float64(parseDigits(s[consumed : consumed+fd]))
+					for k := 0; k < fd; k++ {
+						frac /= 10
+					}
+					if sign < 0 {
+						multiplier -= frac
+					} else {
+						multiplier += frac
+					}
+					consumed += fd
+					isFractional = true
+				}
+			}
 		} else if s[0] == '+' || s[0] == '-' {
 			// Sign with no digits — not a relative item.
 			return 0, false, nil
@@ -1446,7 +1504,11 @@ func (sc *scanner) matchRelative() (int, bool, error) {
 
 	consumed += ws + wlen
 
-	addToDelta(&sc.st.delta, entry.field, multiplier*entry.scale)
+	if isFractional {
+		addFractionalToDelta(&sc.st.delta, entry.field, multiplier*float64(entry.scale))
+	} else {
+		addToDelta(&sc.st.delta, entry.field, int(multiplier)*entry.scale)
+	}
 	return consumed, true, nil
 }
 
