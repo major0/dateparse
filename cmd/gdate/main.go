@@ -67,6 +67,21 @@ func runOffset(s, format string) {
 		os.Exit(1)
 	}
 	if format != "" {
+		// Check if format is a bare unit name (no % tokens).
+		if !strings.Contains(format, "%") {
+			name := strings.ToLower(format)
+			if entry, ok := dateparse.LookupUnit(name); ok {
+				nsPerUnit := nanosPerField[entry.Field] * int64(entry.Scale)
+				if nsPerUnit > 0 {
+					ns := totalNanos(d)
+					val := float64(ns) / float64(nsPerUnit)
+					fmt.Println(strconv.FormatFloat(val, 'f', -1, 64))
+				} else {
+					fmt.Println(0)
+				}
+				return
+			}
+		}
 		fmt.Println(formatDuration(d, format))
 	} else {
 		fmt.Println(totalSeconds(d))
@@ -94,13 +109,58 @@ func printUsage() {
 	fmt.Println("FORMAT controls the output (prefix with +).")
 }
 
+// totalNanos collapses all Duration fields into a single nanosecond count.
+// Calendar fields use approximate conversions (365 days/year, 30 days/month).
+func totalNanos(d dateparse.Duration) int64 {
+	days := int64(d.Years)*365 + int64(d.Months)*30 + int64(d.Days)
+	ns := days * 86400 * 1e9
+	ns += int64(d.Hours) * 3600 * 1e9
+	ns += int64(d.Minutes) * 60 * 1e9
+	ns += int64(d.Seconds) * 1e9
+	ns += int64(d.Nanos)
+	return ns
+}
+
 // totalSeconds computes the signed total seconds from a Duration.
 func totalSeconds(d dateparse.Duration) int64 {
-	// Calendar fields: approximate using 365 days/year, 30 days/month.
-	days := int64(d.Years)*365 + int64(d.Months)*30 + int64(d.Days)
-	secs := days*86400 + int64(d.Hours)*3600 + int64(d.Minutes)*60 + int64(d.Seconds)
-	secs += int64(d.Nanos) / 1e9
-	return secs
+	return totalNanos(d) / 1e9
+}
+
+// convertToUnit collapses the entire Duration into the target unit.
+// The target unit is identified by its field and scale from the unit table.
+func convertToUnit(d dateparse.Duration, field dateparse.UnitField, scale int) int64 {
+	if scale == 0 {
+		return 0
+	}
+	switch field {
+	case dateparse.FieldYears:
+		// Collapse to total months, then to years via scale.
+		totalMonths := int64(d.Years)*12 + int64(d.Months)
+		// scale is in years, so convert: totalMonths / (scale * 12)
+		return totalMonths / (int64(scale) * 12)
+	case dateparse.FieldMonths:
+		totalMonths := int64(d.Years)*12 + int64(d.Months)
+		return totalMonths / int64(scale)
+	case dateparse.FieldDays:
+		totalDays := int64(d.Years)*365 + int64(d.Months)*30 + int64(d.Days)
+		return totalDays / int64(scale)
+	case dateparse.FieldHours:
+		totalDays := int64(d.Years)*365 + int64(d.Months)*30 + int64(d.Days)
+		totalHrs := totalDays*24 + int64(d.Hours)
+		return totalHrs / int64(scale)
+	case dateparse.FieldMinutes:
+		totalDays := int64(d.Years)*365 + int64(d.Months)*30 + int64(d.Days)
+		totalMins := totalDays*24*60 + int64(d.Hours)*60 + int64(d.Minutes)
+		return totalMins / int64(scale)
+	case dateparse.FieldSeconds:
+		ns := totalNanos(d)
+		totalSecs := ns / 1e9
+		return totalSecs / int64(scale)
+	case dateparse.FieldNanos:
+		ns := totalNanos(d)
+		return ns / int64(scale)
+	}
+	return 0
 }
 
 // strftimeToGo maps GNU strftime tokens to Go time.Format reference time components.
@@ -185,12 +245,137 @@ func durationField(d dateparse.Duration, idx int) int {
 	return 0
 }
 
+// fieldPriority defines the reduction order: largest unit first.
+// Lower number = reduced first.
+var fieldPriority = map[dateparse.UnitField]int{
+	dateparse.FieldYears:   0,
+	dateparse.FieldMonths:  1,
+	dateparse.FieldDays:    2,
+	dateparse.FieldHours:   3,
+	dateparse.FieldMinutes: 4,
+	dateparse.FieldSeconds: 5,
+	dateparse.FieldNanos:   6,
+}
+
+// nanosPerField gives the approximate nanoseconds per one unit of each field.
+// Used for remainder reduction in composite format strings.
+var nanosPerField = map[dateparse.UnitField]int64{
+	dateparse.FieldYears:   365 * 86400 * 1e9,
+	dateparse.FieldMonths:  30 * 86400 * 1e9,
+	dateparse.FieldDays:    86400 * 1e9,
+	dateparse.FieldHours:   3600 * 1e9,
+	dateparse.FieldMinutes: 60 * 1e9,
+	dateparse.FieldSeconds: 1e9,
+	dateparse.FieldNanos:   1,
+}
+
+// tokenInfo holds a parsed %{name} or %X token from the format string.
+type tokenInfo struct {
+	name     string // unit name (for %{name}) or short key
+	field    dateparse.UnitField
+	scale    int
+	priority int
+}
+
+// formatPlaceholder holds a parsed %{name} token position and metadata.
+type formatPlaceholder struct {
+	start, end int // byte range in format string (including %{ and })
+	info       tokenInfo
+}
+
 // formatDuration expands format tokens for a Duration.
-// Short tokens: %Y, %M, %D, %h, %m, %s, %n.
-// Long tokens: %{name} where name is a unit from unitTable.
+//
+// For composite formats with multiple %{name} tokens, fields are reduced
+// largest-to-smallest: each token gets the quotient, and the remainder
+// carries to smaller fields. E.g. "3 days 4 hours" with format
+// "%{days} days %{hours} hours" → "3 days 4 hours" (not "3 days 76 hours").
+//
+// Short tokens (%Y, %M, %D, %h, %m, %s, %n) read the raw field value.
+// Long tokens (%{name}) participate in remainder reduction.
 func formatDuration(d dateparse.Duration, format string) string {
-	var b strings.Builder
+	// Pass 1: collect all %{name} tokens and their positions.
+	var placeholders []formatPlaceholder
 	for i := 0; i < len(format); i++ {
+		if format[i] != '%' {
+			continue
+		}
+		if i+1 >= len(format) {
+			break
+		}
+		if format[i+1] == '{' {
+			end := strings.IndexByte(format[i+2:], '}')
+			if end < 0 {
+				break
+			}
+			name := strings.ToLower(format[i+2 : i+2+end])
+			entry, ok := dateparse.LookupUnit(name)
+			if ok {
+				pri := fieldPriority[entry.Field]
+				placeholders = append(placeholders, formatPlaceholder{
+					start: i,
+					end:   i + 2 + end + 1, // past the '}'
+					info: tokenInfo{
+						name:     name,
+						field:    entry.Field,
+						scale:    entry.Scale,
+						priority: pri,
+					},
+				})
+			}
+			i = i + 2 + end // skip past }
+		}
+	}
+
+	// Pass 2: sort placeholders by priority (largest field first) and reduce.
+	// All units get integer values except the smallest (last in priority order),
+	// which gets a decimal remainder.
+	resolvedStr := make(map[int]string) // placeholder index → formatted value
+	if len(placeholders) > 0 {
+		// Sort indices by priority.
+		order := make([]int, len(placeholders))
+		for i := range order {
+			order[i] = i
+		}
+		sortByPriority(order, placeholders)
+
+		remaining := totalNanos(d)
+		sign := int64(1)
+		if remaining < 0 {
+			sign = -1
+			remaining = -remaining
+		}
+		for oi, idx := range order {
+			p := placeholders[idx]
+			nsPerUnit := nanosPerField[p.info.field] * int64(p.info.scale)
+			if nsPerUnit <= 0 {
+				resolvedStr[idx] = "0"
+				continue
+			}
+			isLast := oi == len(order)-1
+			if isLast {
+				// Smallest unit gets decimal remainder.
+				val := float64(sign) * float64(remaining) / float64(nsPerUnit)
+				formatted := strconv.FormatFloat(val, 'f', -1, 64)
+				resolvedStr[idx] = formatted
+			} else {
+				count := remaining / nsPerUnit
+				remaining -= count * nsPerUnit
+				resolvedStr[idx] = strconv.FormatInt(sign*count, 10)
+			}
+		}
+	}
+
+	// Pass 3: expand the format string.
+	var b strings.Builder
+	phIdx := 0
+	for i := 0; i < len(format); i++ {
+		// Check if we're at a placeholder position.
+		if phIdx < len(placeholders) && i == placeholders[phIdx].start {
+			b.WriteString(resolvedStr[phIdx])
+			i = placeholders[phIdx].end - 1 // -1 because loop increments
+			phIdx++
+			continue
+		}
 		if format[i] != '%' {
 			b.WriteByte(format[i])
 			continue
@@ -206,55 +391,44 @@ func formatDuration(d dateparse.Duration, format string) string {
 			continue
 		}
 		if ch == '{' {
-			// Long form: %{name}
+			// Already handled by placeholder pass — skip to }.
 			end := strings.IndexByte(format[i:], '}')
-			if end < 0 {
-				b.WriteString("%{")
-				continue
+			if end >= 0 {
+				i += end
 			}
-			name := format[i+1 : i+end]
-			i += end
-			b.WriteString(strconv.Itoa(lookupDurationUnit(d, name)))
 			continue
 		}
 		if idx, ok := durationFieldMap[ch]; ok {
 			b.WriteString(strconv.Itoa(durationField(d, idx)))
 			continue
 		}
-		// Unknown token: pass through.
 		b.WriteByte('%')
 		b.WriteByte(ch)
 	}
 	return b.String()
 }
 
-// lookupDurationUnit resolves a unit name to the corresponding Duration field
-// divided by the unit's scale factor, using the dateparse unitTable.
-func lookupDurationUnit(d dateparse.Duration, name string) int {
+// sortByPriority sorts indices by placeholder priority (insertion sort, small N).
+func sortByPriority(order []int, phs []formatPlaceholder) {
+	for i := 1; i < len(order); i++ {
+		key := order[i]
+		j := i - 1
+		for j >= 0 && phs[order[j]].info.priority > phs[key].info.priority {
+			order[j+1] = order[j]
+			j--
+		}
+		order[j+1] = key
+	}
+}
+
+// lookupDurationUnit resolves a unit name and converts the entire Duration
+// into that unit. E.g. for "3 days and 4 hours", %{seconds} returns the
+// total duration in seconds, not just the seconds field.
+func lookupDurationUnit(d dateparse.Duration, name string) int64 {
 	name = strings.ToLower(name)
 	entry, ok := dateparse.LookupUnit(name)
 	if !ok {
 		return 0
 	}
-	var fieldVal int
-	switch entry.Field {
-	case dateparse.FieldYears:
-		fieldVal = d.Years
-	case dateparse.FieldMonths:
-		fieldVal = d.Months
-	case dateparse.FieldDays:
-		fieldVal = d.Days
-	case dateparse.FieldHours:
-		fieldVal = d.Hours
-	case dateparse.FieldMinutes:
-		fieldVal = d.Minutes
-	case dateparse.FieldSeconds:
-		fieldVal = d.Seconds
-	case dateparse.FieldNanos:
-		fieldVal = d.Nanos
-	}
-	if entry.Scale == 0 {
-		return 0
-	}
-	return fieldVal / entry.Scale
+	return convertToUnit(d, entry.Field, entry.Scale)
 }

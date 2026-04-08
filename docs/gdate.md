@@ -94,13 +94,53 @@ gdate -d "now" +"%s"
 # 1718452800
 ```
 
-In offset mode, `+FORMAT` selects the output unit or composite format:
+In offset mode, `+FORMAT` supports three styles:
+
+### Bare Unit Name
+
+Convert the entire duration to a single unit with decimal output:
 
 ```sh
-gdate -o "3 days" +seconds     # 259200 (default)
-gdate -o "3 days" +minutes     # 4320
-gdate -o "3 days" +hours       # 72
-gdate -o "3 days" +days        # 3
+gdate -o "3 days and 4 hours" +seconds     # 273600
+gdate -o "3 days and 4 hours" +days        # 3.1666666666666665
+gdate -o "3 days and 4 hours" +fortnights  # 0.2261904761904762
+gdate -o "3 days and 4 hours" +heleks      # 82080.000008208
+```
+
+Plural unit names are supported — `+heleks` resolves to `helek`, `+saeculums` resolves to `saeculum`, etc. Any unit from the [unit table](units.md) works here.
+
+### Composite Format (`%{name}` tokens)
+
+Use `%{name}` tokens for multi-unit output. Fields are reduced largest-to-smallest; the last (smallest) unit receives the decimal remainder:
+
+```sh
+gdate -o "3 days and 4 hours" '+%{days} days %{hours} hours'
+# 3 days 4 hours
+
+gdate -o "3 days and 4 hours" '+%{ghurry} ghurries %{helek} heleks'
+# 190 ghurries 0 heleks
+
+gdate -o "3 days 4 hours 123456789 seconds" '+%{fortnights} fortnights %{days} days %{seconds} seconds'
+# 102 fortnights 1 days 43989 seconds
+```
+
+### Short Tokens (`%X`)
+
+Read raw field values directly from the parsed duration:
+
+| Token | Field |
+|-------|-------|
+| `%Y` | Years |
+| `%M` | Months |
+| `%D` | Days |
+| `%h` | Hours |
+| `%m` | Minutes |
+| `%s` | Seconds |
+| `%n` | Nanos |
+
+```sh
+gdate -o "3 days and 4 hours" '+%D days %h hours'
+# 3 days 4 hours
 ```
 
 ## No Arguments

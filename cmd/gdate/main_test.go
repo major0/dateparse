@@ -108,3 +108,69 @@ func TestInvalidDate(t *testing.T) {
 		t.Error("expected error on stderr for invalid date")
 	}
 }
+
+func TestOffsetBareUnit(t *testing.T) {
+	// "3 days" = 259200 seconds; in days that's exactly 3.
+	stdout, _, code := runGdate(t, "-o", "3 days", "+days")
+	if code != 0 {
+		t.Fatalf("expected exit 0, got %d", code)
+	}
+	if stdout != "3" {
+		t.Errorf("expected 3, got %q", stdout)
+	}
+}
+
+func TestOffsetBareUnitDecimal(t *testing.T) {
+	// "3 days and 4 hours" in days = 3.1666...
+	stdout, _, code := runGdate(t, "-o", "3 days and 4 hours", "+days")
+	if code != 0 {
+		t.Fatalf("expected exit 0, got %d", code)
+	}
+	if !strings.HasPrefix(stdout, "3.166") {
+		t.Errorf("expected ~3.1667, got %q", stdout)
+	}
+}
+
+func TestOffsetBareUnitPlural(t *testing.T) {
+	// "heleks" is not in the unit table but "helek" is; plural fallback should work.
+	stdout, _, code := runGdate(t, "-o", "3 days and 4 hours", "+heleks")
+	if code != 0 {
+		t.Fatalf("expected exit 0, got %d", code)
+	}
+	if !strings.HasPrefix(stdout, "82080") {
+		t.Errorf("expected ~82080, got %q", stdout)
+	}
+}
+
+func TestOffsetCompositeFormat(t *testing.T) {
+	// "3 days and 4 hours" with composite format: largest-to-smallest reduction.
+	stdout, _, code := runGdate(t, "-o", "3 days and 4 hours", "+%{days} days %{hours} hours")
+	if code != 0 {
+		t.Fatalf("expected exit 0, got %d", code)
+	}
+	if stdout != "3 days 4 hours" {
+		t.Errorf("expected '3 days 4 hours', got %q", stdout)
+	}
+}
+
+func TestOffsetShortTokens(t *testing.T) {
+	// Short tokens read raw field values.
+	stdout, _, code := runGdate(t, "-o", "3 days and 4 hours", "+%D days %h hours")
+	if code != 0 {
+		t.Fatalf("expected exit 0, got %d", code)
+	}
+	if stdout != "3 days 4 hours" {
+		t.Errorf("expected '3 days 4 hours', got %q", stdout)
+	}
+}
+
+func TestOffsetFortnights(t *testing.T) {
+	// "3 days and 4 hours" in fortnights = 76h / (14*24h) = 0.2261904...
+	stdout, _, code := runGdate(t, "-o", "3 days and 4 hours", "+fortnights")
+	if code != 0 {
+		t.Fatalf("expected exit 0, got %d", code)
+	}
+	if !strings.HasPrefix(stdout, "0.226") {
+		t.Errorf("expected ~0.2262, got %q", stdout)
+	}
+}

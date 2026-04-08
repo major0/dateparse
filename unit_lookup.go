@@ -21,10 +21,15 @@ type UnitInfo struct {
 }
 
 // LookupUnit returns the field and scale for a lowercase unit name.
+// If the exact name is not found and it ends in "s", the trailing "s"
+// is stripped as a plural fallback (e.g. "heleks" → "helek").
 func LookupUnit(name string) (UnitInfo, bool) {
 	e, ok := unitTable[name]
+	if !ok && len(name) > 1 && name[len(name)-1] == 's' {
+		e, ok = unitTable[name[:len(name)-1]]
+	}
 	if !ok {
 		return UnitInfo{}, false
 	}
-	return UnitInfo{Field: UnitField(e.field), Scale: e.scale}, ok
+	return UnitInfo{Field: UnitField(e.field), Scale: e.scale}, true
 }
